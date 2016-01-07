@@ -84,8 +84,6 @@
     <Compile Include="PneumaticControlModule.cs" />
     <Compile Include="PowerDistributionPanel.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="RobotApp.cs" />
-    <Compile Include="RobotCC.cs" />
     <Compile Include="TalonSrx.cs" />
     <Compile Include="LowLevel_TalonSrx.cs" />
     <Compile Include="TrajectoryBuffer.cs" />
