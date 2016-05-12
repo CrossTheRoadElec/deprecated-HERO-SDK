@@ -89,11 +89,13 @@
     <Compile Include="LowLevel_TalonSrx.cs" />
     <Compile Include="TrajectoryBuffer.cs" />
     <Compile Include="UsbHostDevice.cs" />
+    <Compile Include="SafeOutputPort.cs" />
     <Compile Include="Watchdog.cs" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="ctre_netmf_native, Version=1.2.0.6, Culture=neutral, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
+      <Private>False</Private>
     </Reference>
     <Reference Include="Microsoft.SPOT.Hardware" />
     <Reference Include="Microsoft.SPOT.Native" />

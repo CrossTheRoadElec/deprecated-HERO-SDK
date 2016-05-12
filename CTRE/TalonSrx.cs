@@ -46,6 +46,7 @@ namespace CTRE
             kVoltage = 4,
             kFollower = 5,
             kMotionProfile = 6,
+            kMotionMagic = 7,
         };
 
         public enum LimitMode
@@ -96,8 +97,9 @@ namespace CTRE
             StatusFrameRateQuadEncoder = 2,
             StatusFrameRateAnalogTempVbat = 3,
             StatusFrameRatePulseWidthMeas = 4,
+            StatusFrameMotionProfile = 5,
+            StatusFrameMotionMagic = 6,
         };
-
         /**
          * Enumerated types for Motion Control Set Values.
          * When in Motion Profile control mode, these constants are paseed
@@ -258,6 +260,7 @@ namespace CTRE
             kSpeedMode = 2,
             kCurrentMode = 3,
             kMotionProfileMode = 6,
+            kMotionMagic = 7,
             kDisabled = 15
         };
 
@@ -314,13 +317,17 @@ namespace CTRE
 
         const int CAN_OK = 0;
 
+        private int _lastStatus = 0;
         /**
          * Constructor for the CANTalon device.
          * @param deviceNumber The CAN ID of the Talon SRX
+         * @param externalEnable pass true to prevent sending enable frames.
+ 		 *  	This can be useful when having one device enable the Talon, and
+		 * 		another to control it.
          */
-        public TalonSrx(int deviceNumber)
+        public TalonSrx(int deviceNumber, bool externalEnable = false)
         {
-            m_impl = new CTRE.LowLevel_TalonSrx((ushort)deviceNumber);
+            m_impl = new CTRE.LowLevel_TalonSrx((ushort)deviceNumber, externalEnable);
             ApplyControlMode(m_controlMode);
             m_impl.SetProfileSlotSelect(m_profile);
         }
@@ -354,7 +361,25 @@ namespace CTRE
                 default:
                     m_impl.GetAppliedThrottle(out value);
                     return (float)value / 1023.0f;
+                case ControlMode.kMotionMagic:
+                    m_impl.GetSensorPosition(out value);
+                    return ScaleNativeUnitsToRotations(m_feedbackDevice, value);
             }
+        }
+        public int GetLastStatus()
+        {
+            return _lastStatus;
+        }
+		private int HandleStatus(int status)
+		{
+			/* error handler */
+			if (status != 0)
+			{
+				Reporting.SetError(status, Reporting.getHALErrorMessage(status));
+			}
+			/* mirror last status */
+			_lastStatus = status;
+            return _lastStatus;
         }
         /**
          * Sets the appropriate output on the talon, depending on the mode.
@@ -382,56 +407,48 @@ namespace CTRE
                 {
                     case ControlMode.kPercentVbus:
                         {
-                            m_impl.Set(m_isInverted ? -value : value);
+                            m_impl.Set(m_isInverted ? -value : value, (int)m_sendMode);
                             status = 0;
                         }
                         break;
                     case ControlMode.kFollower:
                         {
-                            status = m_impl.SetDemand((int)value);
+                            status = m_impl.SetDemand((int)value, (int)m_sendMode);
                         }
                         break;
                     case ControlMode.kVoltage:
                         {
                             // Voltage is an 8.8 fixed point number.
                             int volts = (int)((m_isInverted ? -value : value) * 256);
-                            status = m_impl.SetDemand(volts);
+                            status = m_impl.SetDemand(volts, (int)m_sendMode);
                         }
                         break;
                     case ControlMode.kSpeed:
                         /* if the caller has provided scaling info, apply it */
-                        status = m_impl.SetDemand24(ScaleVelocityToNativeUnits(m_feedbackDevice, m_isInverted ? -value : value));
+                        status = m_impl.SetDemand24(ScaleVelocityToNativeUnits(m_feedbackDevice, m_isInverted ? -value : value), (int)m_sendMode);
                         break;
                     case ControlMode.kPosition:
-                        status = m_impl.SetDemand(ScaleRotationsToNativeUnits(m_feedbackDevice, value));
+                        status = m_impl.SetDemand(ScaleRotationsToNativeUnits(m_feedbackDevice, value), (int)m_sendMode);
                         break;
                     case ControlMode.kCurrent:
                         {
                             float milliamperes = (m_isInverted ? -value : value) * 1000.0f; /* mA*/
-                            status = m_impl.SetDemand((int)milliamperes);
+                            status = m_impl.SetDemand((int)milliamperes, (int)m_sendMode);
                         }
                         break;
                     case ControlMode.kMotionProfile:
                         {
-                            status = m_impl.SetDemand((int)value);
+                            status = m_impl.SetDemand((int)value, (int)m_sendMode);
                         }
+                        break;
+                    case ControlMode.kMotionMagic:
+                        status = m_impl.SetDemand(ScaleRotationsToNativeUnits(m_feedbackDevice, value), (int)m_sendMode);
                         break;
                     default:
                         Debug.Print("The CAN Talon does not support this control mode.");
                         break;
                 }
-                if (status != 0)
-                {
-
-                    Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-                }
-
-                status = m_impl.SetModeSelect((int)m_sendMode);
-
-                if (status != 0)
-                {
-                    Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-                }
+				HandleStatus(status);
             }
         }
 
@@ -488,13 +505,10 @@ namespace CTRE
          * @param p Proportional constant to use in PID loop.
          * @see SelectProfileSlot to choose between the two sets of gains.
          */
-        public void SetP(uint slotIdx, float p)
+        public int SetP(uint slotIdx, float p, uint timeoutMs = 0)
         {
-            int status = m_impl.SetPgain(slotIdx, p);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            int status = m_impl.SetPgain(slotIdx, p, timeoutMs);
+            return HandleStatus(status);
         }
 
 
@@ -504,13 +518,10 @@ namespace CTRE
          * @param i Integration constant for the currently selected PID profile.
          * @see SelectProfileSlot to choose between the two sets of gains.
          */
-        public void SetI(uint slotIdx, float i)
+        public int SetI(uint slotIdx, float i, uint timeoutMs = 0)
         {
-            int status = m_impl.SetIgain(slotIdx, i);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            int status = m_impl.SetIgain(slotIdx, i, timeoutMs);
+            return HandleStatus(status);
         }
 
         /**
@@ -519,13 +530,10 @@ namespace CTRE
          * @param d Derivative constant for the currently selected PID profile.
          * @see SelectProfileSlot to choose between the two sets of gains.
          */
-        public void SetD(uint slotIdx, float d)
+        public int SetD(uint slotIdx, float d, uint timeoutMs = 0)
         {
-            int status = m_impl.SetDgain(slotIdx, d);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            int status = m_impl.SetDgain(slotIdx, d, timeoutMs);
+            return HandleStatus(status);
         }
         /**
          * Set the feedforward value of the currently selected profile.
@@ -533,13 +541,10 @@ namespace CTRE
          * @param f Feedforward constant for the currently selected PID profile.
          * @see SelectProfileSlot to choose between the two sets of gains.
          */
-        public void SetF(uint slotIdx, float f)
+        public int SetF(uint slotIdx, float f, uint timeoutMs = 0)
         {
-            int status = m_impl.SetFgain(slotIdx, f);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            int status = m_impl.SetFgain(slotIdx, f, timeoutMs);
+            return HandleStatus(status);
         }
         /**
          * Set the Izone to a nonzero value to auto clear the integral accumulator
@@ -547,26 +552,20 @@ namespace CTRE
          *
          * @see SelectProfileSlot to choose between the two sets of gains.
          */
-        public void SetIzone(uint slotIdx, UInt32 iz)
+        public int SetIzone(uint slotIdx, UInt32 iz, uint timeoutMs = 0)
         {
-            int status = m_impl.SetIzone(slotIdx, iz);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            int status = m_impl.SetIzone(slotIdx, iz, timeoutMs);
+            return HandleStatus(status);
         }
         /**
          * SRX has two available slots for PID.
          * @param slotIdx one or zero depending on which slot caller wants.
          */
-        public void SelectProfileSlot(uint slotIdx)
+        public int SelectProfileSlot(uint slotIdx)
         {
             m_profile = slotIdx; /* only get two slots for now */
             int status = m_impl.SetProfileSlotSelect(m_profile);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            return HandleStatus(status);
         }
         /**
          * Sets control values for closed loop control.
@@ -578,11 +577,11 @@ namespace CTRE
          * using
          * the four-parameter function.
          */
-        public void SetPID(uint slotIdx, float p, float i, float d)
+        public void SetPID(uint slotIdx, float p, float i, float d, uint timeoutMs = 0)
         {
-            SetP(slotIdx, p);
-            SetI(slotIdx, i);
-            SetD(slotIdx, d);
+            SetP(slotIdx, p, timeoutMs);
+            SetI(slotIdx, i, timeoutMs);
+            SetD(slotIdx, d, timeoutMs);
         }
         /**
          * Sets control values for closed loop control.
@@ -592,12 +591,12 @@ namespace CTRE
          * @param d Differential constant.
          * @param f Feedforward constant.
          */
-        public void SetPID(uint slotIdx, float p, float i, float d, float f)
+        public void SetPID(uint slotIdx, float p, float i, float d, float f, uint timeoutMs = 0)
         {
-            SetP(slotIdx, p);
-            SetI(slotIdx, i);
-            SetD(slotIdx, d);
-            SetF(slotIdx, f);
+            SetP(slotIdx, p, timeoutMs);
+            SetI(slotIdx, i, timeoutMs);
+            SetD(slotIdx, d, timeoutMs);
+            SetF(slotIdx, f, timeoutMs);
         }
         /**
          * Select the feedback device to use in closed-loop
@@ -608,10 +607,7 @@ namespace CTRE
             m_feedbackDevice = feedbackDevice;
             /* pass feedback to actual CAN frame */
             int status = m_impl.SetFeedbackDeviceSelect((int)feedbackDevice);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
         }
         /**
          * Select the feedback device to use in closed-loop
@@ -619,10 +615,7 @@ namespace CTRE
         public void SetStatusFrameRateMs(StatusFrameRate stateFrame, uint periodMs)
         {
             int status = m_impl.SetStatusFrameRate((uint)stateFrame, periodMs);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
         }
 
         /**
@@ -638,18 +631,12 @@ namespace CTRE
                                                    : LowLevel_TalonSrx.ParamEnum.eProfileParamSlot0_P;
             // Update the info in m_impl.
             int status = m_impl.RequestParam(param);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             System.Threading.Thread.Sleep(kDelayForSolicitedSignalsMs); /* small yield for getting response */
 
             float p;
             status = m_impl.GetPgain(slotIdx, out p);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             return p;
         }
 
@@ -665,18 +652,12 @@ namespace CTRE
             // Update the info in m_impl.
 
             int status = m_impl.RequestParam(param);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             System.Threading.Thread.Sleep(kDelayForSolicitedSignalsMs); /* small yield for getting response */
 
             float i;
             status = m_impl.GetIgain(slotIdx, out i);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             return i;
         }
 
@@ -691,18 +672,12 @@ namespace CTRE
                                          : LowLevel_TalonSrx.ParamEnum.eProfileParamSlot0_D;
             // Update the info in m_impl.
             int status = m_impl.RequestParam(param);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             System.Threading.Thread.Sleep(kDelayForSolicitedSignalsMs); /* small yield for getting response */
 
             float d;
             status = m_impl.GetDgain(slotIdx, out d);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             return d;
         }
         /**
@@ -715,18 +690,12 @@ namespace CTRE
                                                    : LowLevel_TalonSrx.ParamEnum.eProfileParamSlot0_F;
             // Update the info in m_impl.
             int status = m_impl.RequestParam(param);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
 
             System.Threading.Thread.Sleep(kDelayForSolicitedSignalsMs); /* small yield for getting response */
             float f;
             status = m_impl.GetFgain(slotIdx, out f);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             return f;
         }
         /**
@@ -739,18 +708,12 @@ namespace CTRE
                                              : LowLevel_TalonSrx.ParamEnum.eProfileParamSlot0_IZone;
             // Update the info in m_impl.
             int status = m_impl.RequestParam(param);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             System.Threading.Thread.Sleep(kDelayForSolicitedSignalsMs);
 
             int iz;
             status = m_impl.GetIzone(slotIdx, out iz);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             return iz;
         }
 
@@ -768,10 +731,7 @@ namespace CTRE
         {
             float voltage;
             int status = m_impl.GetBatteryV(out voltage);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             return voltage;
         }
 
@@ -783,10 +743,7 @@ namespace CTRE
             int throttle11;
             int status = m_impl.GetAppliedThrottle(out throttle11);
             float voltage = GetBusVoltage() * ((float)(throttle11) / 1023.0f);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             return voltage;
         }
 
@@ -798,10 +755,7 @@ namespace CTRE
             float current;
 
             int status = m_impl.GetCurrent(out current);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
 
             return current;
         }
@@ -814,10 +768,7 @@ namespace CTRE
             float temp;
 
             int status = m_impl.GetTemp(out temp);
-            if (temp != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             return temp;
         }
         /**
@@ -826,14 +777,11 @@ namespace CTRE
          * Continuous sensors (like analog encoderes) can also partially be set (the
          * portion of the postion based on overflows).
          */
-        public void SetPosition(float pos)
+        public int SetPosition(float pos, uint timeoutMs = 0)
         {
             Int32 nativePos = ScaleRotationsToNativeUnits(m_feedbackDevice, pos);
-            int status = m_impl.SetSensorPosition(nativePos);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            int status = m_impl.SetSensorPosition(nativePos, timeoutMs);
+            return HandleStatus(status);
         }
         /**
          * TODO documentation
@@ -850,10 +798,7 @@ namespace CTRE
         {
             Int32 position;
             int status = m_impl.GetSensorPosition(out position);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             return ScaleNativeUnitsToRotations(m_feedbackDevice, position);
         }
         /**
@@ -864,10 +809,7 @@ namespace CTRE
         public void SetSensorDirection(bool reverseSensor)
         {
             int status = m_impl.SetRevFeedbackSensor(reverseSensor);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
         }
         /**
          * Flips the sign (multiplies by negative one) the throttle values going into
@@ -883,10 +825,7 @@ namespace CTRE
         public void SetClosedLoopOutputDirection(bool reverseOutput)
         {
             int status = m_impl.SetRevMotDuringCloseLoopEn(reverseOutput);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
         }
         /**
          * Returns the current error in the controller.
@@ -898,10 +837,7 @@ namespace CTRE
             int error;
             /* retrieve the closed loop error in native units */
             int status = m_impl.GetCloseLoopErr(out error);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             return error;
         }
         /**
@@ -910,7 +846,7 @@ namespace CTRE
          *       mA for Curent closed loop.
          *       Talon Native Units for position and velocity.
          */
-        public void SetAllowableClosedLoopErr(uint slotIdx, UInt32 allowableCloseLoopError)
+        public void SetAllowableClosedLoopErr(uint slotIdx, UInt32 allowableCloseLoopError, uint timeoutMs = 0)
         {
             /* grab param enum */
             LowLevel_TalonSrx.ParamEnum param;
@@ -922,7 +858,7 @@ namespace CTRE
                 param = LowLevel_TalonSrx.ParamEnum.eProfileParamSlot0_AllowableClosedLoopErr;
             }
             /* send allowable close loop er in native units */
-            ConfigSetParameter(param, allowableCloseLoopError);
+            ConfigSetParameter(param, allowableCloseLoopError, timeoutMs);
         }
 
         /**
@@ -948,10 +884,7 @@ namespace CTRE
         {
             Int32 speed;
             int status = m_impl.GetSensorVelocity(out speed);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             return ScaleNativeUnitsToRpm(m_feedbackDevice, speed);
         }
 
@@ -968,20 +901,14 @@ namespace CTRE
         {
             int position;
             int status = m_impl.GetAnalogInWithOv(out position);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             return position;
         }
 
         public void SetAnalogPosition(int newPosition)
         {
             int status = m_impl.SetParam(LowLevel_TalonSrx.ParamEnum.eAinPosition, newPosition);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
         }
         /**
          * Get the position of whatever is in the analog pin of the Talon, regardless of
@@ -1000,10 +927,7 @@ namespace CTRE
         {
             int vel;
             int status = m_impl.GetAnalogInVel(out vel);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             return vel;
         }
 
@@ -1017,19 +941,13 @@ namespace CTRE
         {
             int position;
             int status = m_impl.GetEncPosition(out position);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             return position;
         }
         public void SetEncPosition(int newPosition)
         {
             int status = m_impl.SetParam(LowLevel_TalonSrx.ParamEnum.eEncPosition, newPosition);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
         }
 
         /**
@@ -1042,50 +960,40 @@ namespace CTRE
         {
             int vel;
             int status = m_impl.GetEncVel(out vel);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             return vel;
         }
         public int GetPulseWidthPosition()
         {
             int param;
             int status = m_impl.GetPulseWidthPosition(out param);
-            if (status != CAN_OK)
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
+            HandleStatus(status);
             return param;
         }
         public void SetPulseWidthPosition(int newPosition)
         {
             int status = m_impl.SetParam(LowLevel_TalonSrx.ParamEnum.ePwdPosition, newPosition);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
         }
         public int GetPulseWidthVelocity()
         {
             int param;
             int status = m_impl.GetPulseWidthVelocity(out param);
-            if (status != CAN_OK)
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
+            HandleStatus(status);
             return param;
         }
         public int GetPulseWidthRiseToFallUs()
         {
             int param;
             int status = m_impl.GetPulseWidthRiseToFallUs(out param);
-            if (status != CAN_OK)
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
+            HandleStatus(status);
             return param;
         }
         public int GetPulseWidthRiseToRiseUs()
         {
             int param;
             int status = m_impl.GetPulseWidthRiseToRiseUs(out param);
-            if (status != CAN_OK)
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
+            HandleStatus(status);
             return param;
         }
         /**
@@ -1140,10 +1048,7 @@ namespace CTRE
         {
             bool retval;
             int status = m_impl.GetQuadApin(out retval);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             return retval;
         }
         /**
@@ -1153,10 +1058,7 @@ namespace CTRE
         {
             bool retval;
             int status = m_impl.GetQuadBpin(out retval);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             return retval;
         }
         /**
@@ -1166,10 +1068,7 @@ namespace CTRE
         {
             bool retval;
             int status = m_impl.GetQuadIdxpin(out retval);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             return retval;
         }
         /**
@@ -1180,10 +1079,7 @@ namespace CTRE
         {
             bool retval;
             int status = m_impl.GetLimitSwitchClosedFor(out retval); /* rename this func, '1' => open, '0' => closed */
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             return retval ? false : true;
         }
         /**
@@ -1194,10 +1090,7 @@ namespace CTRE
         {
             bool retval;
             int status = m_impl.GetLimitSwitchClosedRev(out retval); /* rename this func, '1' => open, '0' => closed */
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             return retval ? false : true;
         }
         /*
@@ -1208,10 +1101,7 @@ namespace CTRE
         {
             int rises;
             int status = m_impl.GetEncIndexRiseEvents(out rises); /* rename this func, '1' => open, '0' => closed */
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             return rises;
         }
         /*
@@ -1223,10 +1113,7 @@ namespace CTRE
             int status = m_impl.SetParam(
                 LowLevel_TalonSrx.ParamEnum.eEncIndexRiseEvents,
                 rises); /* rename this func, '1' => open, '0' => closed */
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
         }
         /**
          * TODO documentation
@@ -1237,15 +1124,9 @@ namespace CTRE
             bool softLim;
             int status = CAN_OK;
             status = m_impl.GetFault_ForSoftLim(out softLim);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             status = m_impl.GetFault_ForLim(out limSwit);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             /* If either fault is asserted, signal caller we are disabled (with false?) */
             return (softLim || limSwit) ? false : true;
         }
@@ -1259,15 +1140,9 @@ namespace CTRE
             bool softLim;
             int status = CAN_OK;
             status = m_impl.GetFault_RevSoftLim(out softLim);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             status = m_impl.GetFault_RevLim(out limSwit);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             /* If either fault is asserted, signal caller we are disabled (with false?) */
             return (softLim || limSwit) ? false : true;
         }
@@ -1283,38 +1158,32 @@ namespace CTRE
 
             /* temperature */
             status = m_impl.GetFault_OverTemp(out val);
-            if (status != CAN_OK)
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
+            HandleStatus(status);
             retval |= (val) ? (UInt32)Faults.kTemperatureFault : 0;
 
             /* voltage */
             status = m_impl.GetFault_UnderVoltage(out val);
-            if (status != CAN_OK)
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
+            HandleStatus(status);
             retval |= (val) ? (UInt32)Faults.kBusVoltageFault : 0;
 
             /* fwd-limit-switch */
             status = m_impl.GetFault_ForLim(out val);
-            if (status != CAN_OK)
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
+            HandleStatus(status);
             retval |= (val) ? (UInt32)Faults.kFwdLimitSwitch : 0;
 
             /* rev-limit-switch */
             status = m_impl.GetFault_RevLim(out val);
-            if (status != CAN_OK)
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
+            HandleStatus(status);
             retval |= (val) ? (UInt32)Faults.kRevLimitSwitch : 0;
 
             /* fwd-soft-limit */
             status = m_impl.GetFault_ForSoftLim(out val);
-            if (status != CAN_OK)
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
+            HandleStatus(status);
             retval |= (val) ? (UInt32)Faults.kFwdSoftLimit : 0;
 
             /* rev-soft-limit */
             status = m_impl.GetFault_RevSoftLim(out val);
-            if (status != CAN_OK)
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
+            HandleStatus(status);
             retval |= (val) ? (UInt32)Faults.kRevSoftLimit : 0;
 
             return retval;
@@ -1327,38 +1196,32 @@ namespace CTRE
 
             /* temperature */
             status = m_impl.GetStckyFault_OverTemp(out val);
-            if (status != CAN_OK)
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
+            HandleStatus(status);
             retval |= (val) ? (UInt32)Faults.kTemperatureFault : 0;
 
             /* voltage */
             status = m_impl.GetStckyFault_UnderVoltage(out val);
-            if (status != CAN_OK)
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
+            HandleStatus(status);
             retval |= (val) ? (UInt32)Faults.kBusVoltageFault : 0;
 
             /* fwd-limit-switch */
             status = m_impl.GetStckyFault_ForLim(out val);
-            if (status != CAN_OK)
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
+            HandleStatus(status);
             retval |= (val) ? (UInt32)Faults.kFwdLimitSwitch : 0;
 
             /* rev-limit-switch */
             status = m_impl.GetStckyFault_RevLim(out val);
-            if (status != CAN_OK)
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
+            HandleStatus(status);
             retval |= (val) ? (UInt32)Faults.kRevLimitSwitch : 0;
 
             /* fwd-soft-limit */
             status = m_impl.GetStckyFault_ForSoftLim(out val);
-            if (status != CAN_OK)
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
+            HandleStatus(status);
             retval |= (val) ? (UInt32)Faults.kFwdSoftLimit : 0;
 
             /* rev-soft-limit */
             status = m_impl.GetStckyFault_RevSoftLim(out val);
-            if (status != CAN_OK)
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
+            HandleStatus(status);
             retval |= (val) ? (UInt32)Faults.kRevSoftLimit : 0;
 
             return retval;
@@ -1389,10 +1252,7 @@ namespace CTRE
                full rev. */
             float rampRatedThrotPer10ms = (rampRate * 1023.0f / 12.0f) / 100f;
             int status = m_impl.SetRampThrottle((int)rampRatedThrotPer10ms);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
         }
         public void SetVoltageCompensationRampRate(float rampRate)
         {
@@ -1400,10 +1260,7 @@ namespace CTRE
               directly caps the change in target voltage */
             int status = CAN_OK;
             status = m_impl.SetVoltageCompensationRate(rampRate / 1000);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
         }
         /**
          * Sets a voltage change rate that applies only when a close loop contorl mode
@@ -1417,10 +1274,7 @@ namespace CTRE
         {
             int closeLoopRampRate = (int)(rampRate * 1023.0f / 12.0f / 1000.0f);
             int status = m_impl.SetCloseLoopRampRate(slotIdx, closeLoopRampRate);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
         }
 
         /**
@@ -1430,23 +1284,11 @@ namespace CTRE
         {
             int firmwareVersion;
             int status = m_impl.RequestParam(LowLevel_TalonSrx.ParamEnum.eFirmVers);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             System.Threading.Thread.Sleep(kDelayForSolicitedSignalsMs);
             status =
                   m_impl.GetParamResponseInt32(LowLevel_TalonSrx.ParamEnum.eFirmVers, out firmwareVersion);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
-
-            /* only sent once on boot */
-            // int status = m_impl.GetFirmVers(firmwareVersion);
-            // if (status != CAN_OK) {
-            //  Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            //}
+            HandleStatus(status);
 
             return (UInt32)firmwareVersion;
         }
@@ -1456,17 +1298,11 @@ namespace CTRE
         public int GetIaccum()
         {
             int status = m_impl.RequestParam(LowLevel_TalonSrx.ParamEnum.ePidIaccum);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             System.Threading.Thread.Sleep(kDelayForSolicitedSignalsMs); /* small yield for getting response */
             int iaccum;
             status = m_impl.GetParamResponseInt32(LowLevel_TalonSrx.ParamEnum.ePidIaccum, out iaccum);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             return iaccum;
         }
         /**
@@ -1475,17 +1311,14 @@ namespace CTRE
         public void ClearIaccum()
         {
             int status = m_impl.SetParam(LowLevel_TalonSrx.ParamEnum.ePidIaccum, 0);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
         }
 
 
         /**
          * TODO documentation
          */
-        public void ConfigNeutralMode(NeutralMode mode)
+        public int ConfigNeutralMode(NeutralMode mode)
         {
             int status = CAN_OK;
             switch (mode)
@@ -1501,10 +1334,7 @@ namespace CTRE
                     status = m_impl.SetOverrideBrakeType(kBrakeOverride_OverrideCoast);
                     break;
             }
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            return HandleStatus(status);
         }
         /**
          * @return nonzero if brake is enabled during neutral.  Zero if coast is enabled
@@ -1514,10 +1344,7 @@ namespace CTRE
         {
             bool brakeEn = false;
             int status = m_impl.GetBrakeIsEnabled(out brakeEn);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             return brakeEn;
         }
         /**
@@ -1554,11 +1381,11 @@ namespace CTRE
          * @deprecated not implemented
          */
         public void ConfigSoftPositionLimits(float forwardLimitPosition,
-                                                float reverseLimitPosition)
+                                                float reverseLimitPosition, uint timeoutMs = 0)
         {
             ConfigLimitMode(LimitMode.kLimitMode_SoftPositionLimits);
-            ConfigForwardLimit(forwardLimitPosition);
-            ConfigReverseLimit(reverseLimitPosition);
+            ConfigForwardLimit(forwardLimitPosition, timeoutMs);
+            ConfigReverseLimit(reverseLimitPosition, timeoutMs);
         }
 
         /**
@@ -1583,42 +1410,27 @@ namespace CTRE
                     /* turn OFF both limits. SRX has individual enables and polarity for each
                      * limit switch.*/
                     status = m_impl.SetForwardSoftEnable(0);
-                    if (status != CAN_OK)
-                    {
-                        Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-                    }
+                    HandleStatus(status);
                     status = m_impl.SetReverseSoftEnable(0);
-                    if (status != CAN_OK)
+                    HandleStatus(status);
                     {
                         Reporting.SetError(status, Reporting.getHALErrorMessage(status));
                     }
                     /* override enable the limit switches, this circumvents the webdash */
                     status = m_impl.SetOverrideLimitSwitchEn(
                         kLimitSwitchOverride_EnableFwd_EnableRev);
-                    if (status != CAN_OK)
-                    {
-                        Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-                    }
+                    HandleStatus(status);
                     break;
                 case LimitMode.kLimitMode_SoftPositionLimits: /** Use both switches and soft limits */
                     /* turn on both limits. SRX has individual enables and polarity for each
                      * limit switch.*/
                     status = m_impl.SetForwardSoftEnable(1);
-                    if (status != CAN_OK)
-                    {
-                        Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-                    }
+                    HandleStatus(status);
                     status = m_impl.SetReverseSoftEnable(1);
-                    if (status != CAN_OK)
-                    {
-                        Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-                    }
+                    HandleStatus(status);
                     /* override enable the limit switches, this circumvents the webdash */
                     status = m_impl.SetOverrideLimitSwitchEn(kLimitSwitchOverride_EnableFwd_EnableRev);
-                    if (status != CAN_OK)
-                    {
-                        Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-                    }
+                    HandleStatus(status);
                     break;
 
                 case LimitMode.kLimitMode_SrxDisableSwitchInputs: /** disable both limit switches and
@@ -1626,22 +1438,12 @@ namespace CTRE
                     /* turn on both limits. SRX has individual enables and polarity for each
                      * limit switch.*/
                     status = m_impl.SetForwardSoftEnable(0);
-                    if (status != CAN_OK)
-                    {
-                        Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-                    }
+                    HandleStatus(status);
                     status = m_impl.SetReverseSoftEnable(0);
-                    if (status != CAN_OK)
-                    {
-                        Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-                    }
+                    HandleStatus(status);
                     /* override enable the limit switches, this circumvents the webdash */
-                    status = m_impl.SetOverrideLimitSwitchEn(
-                        kLimitSwitchOverride_DisableFwd_DisableRev);
-                    if (status != CAN_OK)
-                    {
-                        Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-                    }
+                    status = m_impl.SetOverrideLimitSwitchEn(kLimitSwitchOverride_DisableFwd_DisableRev);
+                    HandleStatus(status);
                     break;
             }
         }
@@ -1649,15 +1451,12 @@ namespace CTRE
         /**
          * TODO documentation
          */
-        public void ConfigForwardLimit(float forwardLimitPosition)
+        public void ConfigForwardLimit(float forwardLimitPosition, uint timeoutMs = 0)
         {
             int status = CAN_OK;
             Int32 nativeLimitPos = ScaleRotationsToNativeUnits(m_feedbackDevice, forwardLimitPosition);
-            status = m_impl.SetForwardSoftLimit(nativeLimitPos);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            status = m_impl.SetForwardSoftLimit(nativeLimitPos, timeoutMs);
+            HandleStatus(status);
         }
         /**
          * Change the fwd limit switch setting to normally open or closed.
@@ -1674,10 +1473,7 @@ namespace CTRE
             int status =
                 m_impl.SetParam(LowLevel_TalonSrx.ParamEnum.eOnBoot_LimitSwitch_Forward_NormallyClosed,
                                  normallyOpen ? 0 : 1);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
         }
         /**
          * Change the rev limit switch setting to normally open or closed.
@@ -1694,34 +1490,29 @@ namespace CTRE
             int status =
                 m_impl.SetParam(LowLevel_TalonSrx.ParamEnum.eOnBoot_LimitSwitch_Reverse_NormallyClosed,
                                  normallyOpen ? 0 : 1);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
         }
         /**
          * TODO documentation
          */
-        public void ConfigReverseLimit(float reverseLimitPosition)
+        public void ConfigReverseLimit(float reverseLimitPosition, uint timeoutMs = 0)
         {
             int status = CAN_OK;
             Int32 nativeLimitPos = ScaleRotationsToNativeUnits(m_feedbackDevice, reverseLimitPosition);
-            status = m_impl.SetReverseSoftLimit(nativeLimitPos);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            status = m_impl.SetReverseSoftLimit(nativeLimitPos, timeoutMs);
+            HandleStatus(status);
         }
         /**
          * TODO documentation
          */
-        public void ConfigMaxOutputVoltage(float voltage)
+        public void ConfigMaxOutputVoltage(float voltage, uint timeoutMs = 0)
         {
             /* config peak throttle when in closed-loop mode in the fwd and rev direction. */
-            ConfigPeakOutputVoltage(voltage, -voltage);
+            ConfigPeakOutputVoltage(voltage, -voltage, timeoutMs);
         }
-        public void ConfigPeakOutputVoltage(float forwardVoltage, float reverseVoltage)
+        public int ConfigPeakOutputVoltage(float forwardVoltage, float reverseVoltage, uint timeoutMs = 0)
         {
+            int status1 = CAN_OK, status2 = CAN_OK;
             /* bounds checking */
             if (forwardVoltage > 12)
                 forwardVoltage = 12;
@@ -1732,11 +1523,16 @@ namespace CTRE
             else if (reverseVoltage < -12)
                 reverseVoltage = -12;
             /* config calls */
-            ConfigSetParameter(LowLevel_TalonSrx.ParamEnum.ePeakPosOutput, 1023f * forwardVoltage / 12.0f);
-            ConfigSetParameter(LowLevel_TalonSrx.ParamEnum.ePeakNegOutput, 1023f * reverseVoltage / 12.0f);
+            status1 = ConfigSetParameter(LowLevel_TalonSrx.ParamEnum.ePeakPosOutput, 1023f * forwardVoltage / 12.0f, timeoutMs);
+            status2 = ConfigSetParameter(LowLevel_TalonSrx.ParamEnum.ePeakNegOutput, 1023f * reverseVoltage / 12.0f, timeoutMs);
+            /* return the worst one */
+            if (status1 == CAN_OK)
+                status1 = status2;
+            return status1;
         }
-        public void ConfigNominalOutputVoltage(float forwardVoltage, float reverseVoltage)
+        public int ConfigNominalOutputVoltage(float forwardVoltage, float reverseVoltage, uint timeoutMs = 0)
         {
+            int status1 = CAN_OK, status2 = CAN_OK;
             /* bounds checking */
             if (forwardVoltage > 12)
                 forwardVoltage = 12;
@@ -1747,32 +1543,30 @@ namespace CTRE
             else if (reverseVoltage < -12)
                 reverseVoltage = -12;
             /* config calls */
-            ConfigSetParameter(LowLevel_TalonSrx.ParamEnum.eNominalPosOutput, 1023f * forwardVoltage / 12.0f);
-            ConfigSetParameter(LowLevel_TalonSrx.ParamEnum.eNominalNegOutput, 1023f * reverseVoltage / 12.0f);
+            status1 = ConfigSetParameter(LowLevel_TalonSrx.ParamEnum.eNominalPosOutput, 1023f * forwardVoltage / 12.0f, timeoutMs);
+            status2 = ConfigSetParameter(LowLevel_TalonSrx.ParamEnum.eNominalNegOutput, 1023f * reverseVoltage / 12.0f, timeoutMs);
+            /* return the worst one */
+            if (status1 == CAN_OK)
+                status1 = status2;
+            return status1;
         }
         /**
          * General set frame.  Since the parameter is a general integral type, this can
          * be used for testing future features.
          */
-        public void ConfigSetParameter(CTRE.LowLevel_TalonSrx.ParamEnum paramEnum, float value)
+        public int ConfigSetParameter(CTRE.LowLevel_TalonSrx.ParamEnum paramEnum, float value, uint timeoutMs = 0)
         {
             int status;
             /* config peak throttle when in closed-loop mode in the positive direction. */
-            status = m_impl.SetParam(paramEnum, value);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            status = m_impl.SetParam(paramEnum, value, timeoutMs);
+            return HandleStatus(status);
         }
-        public void ConfigSetParameter(UInt32 paramEnum, int value)
+        public void ConfigSetParameter(UInt32 paramEnum, int value, uint timeoutMs = 0)
         {
             int status;
             /* config peak throttle when in closed-loop mode in the positive direction. */
-            status = m_impl.SetParam((LowLevel_TalonSrx.ParamEnum)paramEnum, value);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            status = m_impl.SetParam((LowLevel_TalonSrx.ParamEnum)paramEnum, value, timeoutMs);
+            HandleStatus(status);
         }
         /**
          * General get frame.  Since the parameter is a general integral type, this can
@@ -1783,17 +1577,15 @@ namespace CTRE
             bool retval = true;
             /* send the request frame */
             int status = m_impl.RequestParam((LowLevel_TalonSrx.ParamEnum)paramEnum);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
+            HandleStatus(status);
+            if (status != CAN_OK) {
                 retval = false;
             }
             System.Threading.Thread.Sleep(kDelayForSolicitedSignalsMs); /* small yield for getting response */
                                                                         /* get the last received update */
             status = m_impl.GetParamResponse((LowLevel_TalonSrx.ParamEnum)paramEnum, out dvalue);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
+            HandleStatus(status);
+            if (status != CAN_OK) {
                 retval = false;
             }
             return retval;
@@ -1833,13 +1625,13 @@ namespace CTRE
                 case ControlMode.kMotionProfile:
                     m_sendMode = TalonControlMode.kMotionProfileMode;
                     break;
+                case ControlMode.kMotionMagic:
+                    m_sendMode = TalonControlMode.kMotionMagic;
+                    break;
             }
             // Keep the talon disabled until Set() is called.
             int status = m_impl.SetModeSelect((int)TalonControlMode.kDisabled);
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
         }
         /**
          * TODO documentation
@@ -1958,10 +1750,7 @@ namespace CTRE
                     break;
             }
             /* handle any detected errors */
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
             /* if scaling information is not possible, signal caller
               by returning zero */
             if (false == scalingAvail)
@@ -2054,19 +1843,19 @@ namespace CTRE
          * @param risingEdge   boolean input, pass true to clear the position on rising edge,
          *          pass false to clear the position on falling edge.
          */
-        public void EnableZeroSensorPositionOnIndex(bool enable, bool risingEdge)
+        public void EnableZeroSensorPositionOnIndex(bool enable, bool risingEdge, uint timeoutMs = 0)
         {
             if (enable)
             {
                 /* enable the feature, update the edge polarity first to ensure
                   it is correct before the feature is enabled. */
-                ConfigSetParameter(CTRE.LowLevel_TalonSrx.ParamEnum.eQuadIdxPolarity, risingEdge ? 1 : 0);
-                ConfigSetParameter(CTRE.LowLevel_TalonSrx.ParamEnum.eClearPositionOnIdx, 1);
+                ConfigSetParameter(CTRE.LowLevel_TalonSrx.ParamEnum.eQuadIdxPolarity, risingEdge ? 1 : 0, timeoutMs);
+                ConfigSetParameter(CTRE.LowLevel_TalonSrx.ParamEnum.eClearPositionOnIdx, 1, timeoutMs);
             }
             else {
                 /* disable the feature first, then update the edge polarity. */
-                ConfigSetParameter(CTRE.LowLevel_TalonSrx.ParamEnum.eClearPositionOnIdx, 0);
-                ConfigSetParameter(CTRE.LowLevel_TalonSrx.ParamEnum.eQuadIdxPolarity, risingEdge ? 1 : 0);
+                ConfigSetParameter(CTRE.LowLevel_TalonSrx.ParamEnum.eClearPositionOnIdx, 0, timeoutMs);
+                ConfigSetParameter(CTRE.LowLevel_TalonSrx.ParamEnum.eQuadIdxPolarity, risingEdge ? 1 : 0, timeoutMs);
             }
         }
         /**
@@ -2190,10 +1979,7 @@ namespace CTRE
             motionProfileStatus.activePoint.zeroPos = false; /* this signal is only used sending pts to Talon */
             motionProfileStatus.activePoint.timeDurMs = 0;   /* this signal is only used sending pts to Talon */
 
-            if (status != CAN_OK)
-            {
-                Reporting.SetError(status, Reporting.getHALErrorMessage(status));
-            }
+            HandleStatus(status);
         }
         /**
          * Clear the hasUnderrun flag in Talon's Motion Profile Executer when MPE is ready for another point,
@@ -2204,9 +1990,61 @@ namespace CTRE
          * gets a chance to instrument or react.  Caller could also check the isUnderrun flag
          * which automatically clears when fault condition is removed.
          */
-        public void ClearMotionProfileHasUnderrun()
+        public void ClearMotionProfileHasUnderrun(uint timeoutMs = 0)
         {
-            ConfigSetParameter(LowLevel_TalonSrx.ParamEnum.eMotionProfileHasUnderrunErr, 0);
+            ConfigSetParameter(LowLevel_TalonSrx.ParamEnum.eMotionProfileHasUnderrunErr, 0, timeoutMs);
+        }
+        /**
+         * Set the Cruise Velocity used in Motion Magic Control Mode.
+         * @param motmagicCruiseVeloc Cruise(peak) velocity in RPM.
+         */
+        public int SetMotionMagicCruiseVelocity(float motMagicCruiseVeloc, uint timeoutMs = 0)
+        {
+            int velNative = ScaleVelocityToNativeUnits(m_feedbackDevice, motMagicCruiseVeloc);
+            return ConfigSetParameter(LowLevel_TalonSrx.ParamEnum.eMotMag_VelCruise, velNative, timeoutMs);
+        }
+        /**
+         * Set the Acceleration used in Motion Magic Control Mode.
+         * @param motMagicAccel Accerleration in RPM per second.
+         */
+        public int SetMotionMagicAcceleration(float motMagicAccel, uint timeoutMs = 0)
+        {
+            int accel = ScaleVelocityToNativeUnits(m_feedbackDevice, motMagicAccel);
+            return ConfigSetParameter(LowLevel_TalonSrx.ParamEnum.eMotMag_Accel, accel, timeoutMs);
+        }
+        /**
+         * @return polled motion magic cruise velocity setting from Talon.  
+		 * RPM if units are configured, velocity native units otherwise.
+         */
+        public float GetMotionMagicCruiseVelocity()
+        {
+            int status = m_impl.RequestParam(LowLevel_TalonSrx.ParamEnum.eMotMag_VelCruise);
+            HandleStatus(status);
+
+            System.Threading.Thread.Sleep(kDelayForSolicitedSignalsMs); /* small yield for getting response */
+
+            float retval;
+            status = m_impl.GetParamResponse(LowLevel_TalonSrx.ParamEnum.eMotMag_VelCruise, out retval);
+            HandleStatus(status);
+
+            return ScaleNativeUnitsToRpm(m_feedbackDevice, (Int32)retval);
+        }
+        /**
+         * @return polled motion magic acceleration setting from Talon.  
+		 * RPM per second if units are configured, velocity native units per second otherwise.
+         */
+        public float GetMotionMagicAcceleration()
+        {
+            int status = m_impl.RequestParam(LowLevel_TalonSrx.ParamEnum.eMotMag_Accel);
+            HandleStatus(status);
+
+            System.Threading.Thread.Sleep(kDelayForSolicitedSignalsMs); /* small yield for getting response */
+
+            float retval;
+            status = m_impl.GetParamResponse(LowLevel_TalonSrx.ParamEnum.eMotMag_Accel, out retval);
+            HandleStatus(status);
+
+            return ScaleNativeUnitsToRpm(m_feedbackDevice, (Int32)retval);
         }
         /**
         * Common interface for inverting direction of a speed controller.
@@ -2223,5 +2061,9 @@ namespace CTRE
          */
         public bool GetInverted() { return m_isInverted; }
 
+        /**
+         * @return low level object for advanced control.
+         */
+        public CTRE.LowLevel_TalonSrx GetLowLevelObject() { return m_impl; }
     }
 }

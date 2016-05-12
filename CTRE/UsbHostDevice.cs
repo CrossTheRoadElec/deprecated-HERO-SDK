@@ -61,6 +61,8 @@ namespace CTRE
                 toFill.pov = _gpInts[1];
                 toFill.vid = (uint)_gpInts[6];
                 toFill.pid = (uint)_gpInts[7];
+                toFill.vendorSpecF = _gpFlts;
+                toFill.vendorSpecI = _gpInts;
             }
             return ret;
         }

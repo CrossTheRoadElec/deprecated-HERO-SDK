@@ -191,5 +191,9 @@ namespace CTRE
             HandleErr(m_impl.GetBlacklistSolen(idx, out retval));
             return retval;
         }
+        /**
+         * @return low level object for advanced control.
+         */
+        public CTRE.LowLevel_Pcm GetLowLevelObject() { return m_impl; }
     }
 }

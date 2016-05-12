@@ -11,6 +11,8 @@ namespace CTRE
         public Int32 pov = 0;           //!< -1 if POV is not pressed, degress when POV is used (0,45,90,135,180,225,270,315).
         public UInt32 vid = 0;
         public UInt32 pid = 0;
+        public int[] vendorSpecI = null;
+        public float[] vendorSpecF = null;
         
         public GamepadValues()
         {
@@ -34,6 +36,8 @@ namespace CTRE
             pov = rhs.pov;
             vid = rhs.vid;
             pid = rhs.pid;
+            vendorSpecI = rhs.vendorSpecI;
+            vendorSpecF = rhs.vendorSpecF;
         }
 
         internal static GamepadValues ZeroGamepadValues = new GamepadValues();

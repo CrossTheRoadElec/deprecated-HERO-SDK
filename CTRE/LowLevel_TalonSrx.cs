@@ -122,6 +122,7 @@ namespace CTRE
         const UInt32 STATUS_7 = 0x02041580;
         const UInt32 STATUS_8 = 0x020415C0;
         const UInt32 STATUS_9 = 0x02041600;
+        const UInt32 STATUS_10= 0x02041640;
 
         const UInt32 CONTROL_1 = 0x02040000;
         const UInt32 CONTROL_2 = 0x02040040;
@@ -149,6 +150,7 @@ namespace CTRE
         const int kStatusFrame_AnalogTempVbat = 3;
         const int kStatusFrame_PulseWidthMeas = 4;
         const int kStatusFrame_MotionProfile = 5;
+        const int kStatusFrame_MotionMagic = 6;
         /* Motion Profile status bits */
         const int kMotionProfileFlag_ActTraj_IsValid = 0x1;
         const int kMotionProfileFlag_HasUnderrun = 0x2;
@@ -269,6 +271,9 @@ namespace CTRE
             eMotionProfileHasUnderrunErr = 119,
             eReserved120 = 120,
             eLegacyControlMode = 121,
+            eMotMag_Accel = 122,
+            eMotMag_VelCruise = 123,
+            eStatus10FrameRate = 124, // TALON_Status_10_MotMag_100ms_t 
         };
 
         private UInt64 _cache;
@@ -299,9 +304,10 @@ namespace CTRE
 
         private System.Collections.Hashtable _sigs = new System.Collections.Hashtable();
 
-        public LowLevel_TalonSrx(UInt16 deviceId)
+        public LowLevel_TalonSrx(UInt16 deviceId, bool externalEnable = false)
             : base(deviceId)
         {
+            if(false == externalEnable)
             CTRE.Native.CAN.Send(CONTROL_1 | _deviceNumber, 0x00, 2, 50);
             CTRE.Native.CAN.Send(CONTROL_5 | _deviceNumber, 0x00, 8, 10);
             SetOverrideLimitSwitchEn(1);
@@ -355,13 +361,13 @@ namespace CTRE
                 }
             }
         }
-        public void Set(float value)
+        public void Set(float value, Int32 controlMode)
         {
             if (value > 1)
                 value = 1;
             else if (value < -1)
                 value = -1;
-            SetDemand24((int)(1023 * value)); /* must be within [-1023,1023] */
+            SetDemand24((int)(1023 * value),controlMode); /* must be within [-1023,1023] */
         }
         /*---------------------setters and getters that use the param
          * request/response-------------*/
@@ -377,15 +383,41 @@ namespace CTRE
          * Talon will automatically send a PARAM_RESPONSE after the set, so
          * GetParamResponse will catch the latest value after a couple ms.
          */
-        public int SetParamRaw(ParamEnum paramEnum, int rawBits)
+        public int SetParamRaw(ParamEnum paramEnum, int rawBits, uint timeoutMs = 0)
         {
             /* caller is using param API.  Open session if it hasn'T been done. */
             if (0 == _can_h) OpenSessionIfNeedBe();
+            /* wait for response frame */
+            if (timeoutMs != 0)
+            {
+                /* remove stale entry if caller wants to wait for response. */
+                _sigs.Remove((uint)paramEnum);
+            }
+            /* frame set request and send it */
             UInt64 frame = ((UInt64)rawBits) & 0xFFFFFFFF;
             frame <<= 8;
             frame |= (byte)paramEnum;
             uint arbId = PARAM_SET | GetDeviceNumber();
             int status = CTRE.Native.CAN.Send(arbId, frame, 5, 0);
+            /* wait for response frame */
+            if(timeoutMs > 0)
+            {
+                int readBits;
+                /* loop until timeout or receive if caller wants to check */
+                while (timeoutMs > 0)
+                {
+                    /* wait a bit */
+                    System.Threading.Thread.Sleep(1);
+                    /* see if response was received */
+                    if(0 == GetParamResponseRaw(paramEnum, out readBits))
+                        break; /* leave inner loop */
+                    /* decrement */
+                    --timeoutMs;
+                }
+                /* if we get here then we timed out */
+                if (timeoutMs == 0)
+                    status = (int)Codes.CTR_SigNotUpdated;
+            }
             return status;
         }
         /**
@@ -427,7 +459,7 @@ namespace CTRE
             return status;
         }
 
-        public int SetParam(ParamEnum paramEnum, float value)
+        public int SetParam(ParamEnum paramEnum, float value, uint timeoutMs = 0)
         {
             Int32 rawbits = 0;
             switch (paramEnum)
@@ -485,7 +517,7 @@ namespace CTRE
                     rawbits = (Int32)value;
                     break;
             }
-            return SetParamRaw(paramEnum, rawbits);
+            return SetParamRaw(paramEnum, rawbits, timeoutMs);
         }
         public int GetParamResponse(ParamEnum paramEnum, out float value)
         {
@@ -526,40 +558,40 @@ namespace CTRE
         /*----- If your application requires changing these values consider using both slots and switch between slot0 <=> slot1. ------------------*/
         /*----- If your application requires changing these signals frequently then it makes sense to leverage this API. --------------------------*/
         /*----- Getters don't block, so it may require several calls to get the latest value. --------------------------*/
-        public int SetPgain(UInt32 slotIdx, float gain)
+        public int SetPgain(UInt32 slotIdx, float gain, uint timeoutMs = 0)
         {
-            if (slotIdx == 0) return SetParam(ParamEnum.eProfileParamSlot0_P, gain);
-            return SetParam(ParamEnum.eProfileParamSlot1_P, gain);
+            if (slotIdx == 0) return SetParam(ParamEnum.eProfileParamSlot0_P, gain, timeoutMs);
+            return SetParam(ParamEnum.eProfileParamSlot1_P, gain, timeoutMs);
         }
-        public int SetIgain(UInt32 slotIdx, float gain)
+        public int SetIgain(UInt32 slotIdx, float gain, uint timeoutMs = 0)
         {
-            if (slotIdx == 0) return SetParam(ParamEnum.eProfileParamSlot0_I, gain);
-            return SetParam(ParamEnum.eProfileParamSlot1_I, gain);
+            if (slotIdx == 0) return SetParam(ParamEnum.eProfileParamSlot0_I, gain, timeoutMs);
+            return SetParam(ParamEnum.eProfileParamSlot1_I, gain, timeoutMs);
         }
-        public int SetDgain(UInt32 slotIdx, float gain)
+        public int SetDgain(UInt32 slotIdx, float gain, uint timeoutMs = 0)
         {
-            if (slotIdx == 0) return SetParam(ParamEnum.eProfileParamSlot0_D, gain);
-            return SetParam(ParamEnum.eProfileParamSlot1_D, gain);
+            if (slotIdx == 0) return SetParam(ParamEnum.eProfileParamSlot0_D, gain, timeoutMs);
+            return SetParam(ParamEnum.eProfileParamSlot1_D, gain, timeoutMs);
         }
-        public int SetFgain(UInt32 slotIdx, float gain)
+        public int SetFgain(UInt32 slotIdx, float gain, uint timeoutMs = 0)
         {
-            if (slotIdx == 0) return SetParam(ParamEnum.eProfileParamSlot0_F, gain);
-            return SetParam(ParamEnum.eProfileParamSlot1_F, gain);
+            if (slotIdx == 0) return SetParam(ParamEnum.eProfileParamSlot0_F, gain, timeoutMs);
+            return SetParam(ParamEnum.eProfileParamSlot1_F, gain, timeoutMs);
         }
-        public int SetIzone(UInt32 slotIdx, uint zone)
+        public int SetIzone(UInt32 slotIdx, uint zone, uint timeoutMs = 0)
         {
-            if (slotIdx == 0) return SetParam(ParamEnum.eProfileParamSlot0_IZone, zone);
-            return SetParam(ParamEnum.eProfileParamSlot1_IZone, zone);
+            if (slotIdx == 0) return SetParam(ParamEnum.eProfileParamSlot0_IZone, zone, timeoutMs);
+            return SetParam(ParamEnum.eProfileParamSlot1_IZone, zone, timeoutMs);
         }
-        public int SetCloseLoopRampRate(UInt32 slotIdx, int closeLoopRampRate)
+        public int SetCloseLoopRampRate(UInt32 slotIdx, int closeLoopRampRate, uint timeoutMs = 0)
         {
             if (slotIdx == 0)
-                return SetParam(ParamEnum.eProfileParamSlot0_CloseLoopRampRate, closeLoopRampRate);
-            return SetParam(ParamEnum.eProfileParamSlot1_CloseLoopRampRate, closeLoopRampRate);
+                return SetParam(ParamEnum.eProfileParamSlot0_CloseLoopRampRate, closeLoopRampRate, timeoutMs);
+            return SetParam(ParamEnum.eProfileParamSlot1_CloseLoopRampRate, closeLoopRampRate, timeoutMs);
         }
-        public int SetVoltageCompensationRate(float voltagePerMs)
+        public int SetVoltageCompensationRate(float voltagePerMs, uint timeoutMs = 0)
         {
-            return SetParam(ParamEnum.eProfileParamVcompRate, voltagePerMs);
+            return SetParam(ParamEnum.eProfileParamVcompRate, voltagePerMs, timeoutMs);
         }
         public int GetPgain(UInt32 slotIdx, out float gain)
         {
@@ -597,25 +629,25 @@ namespace CTRE
         {
             return GetParamResponse(ParamEnum.eProfileParamVcompRate, out voltagePerMs);
         }
-        public int SetSensorPosition(int pos)
+        public int SetSensorPosition(int pos, uint timeoutMs = 0)
         {
-            return SetParam(ParamEnum.eSensorPosition, pos);
+            return SetParam(ParamEnum.eSensorPosition, pos, timeoutMs);
         }
-        public int SetForwardSoftLimit(int forwardLimit)
+        public int SetForwardSoftLimit(int forwardLimit, uint timeoutMs = 0)
         {
-            return SetParam(ParamEnum.eProfileParamSoftLimitForThreshold, forwardLimit);
+            return SetParam(ParamEnum.eProfileParamSoftLimitForThreshold, forwardLimit, timeoutMs);
         }
-        public int SetReverseSoftLimit(int reverseLimit)
+        public int SetReverseSoftLimit(int reverseLimit, uint timeoutMs = 0)
         {
-            return SetParam(ParamEnum.eProfileParamSoftLimitRevThreshold, reverseLimit);
+            return SetParam(ParamEnum.eProfileParamSoftLimitRevThreshold, reverseLimit, timeoutMs);
         }
-        public int SetForwardSoftEnable(int enable)
+        public int SetForwardSoftEnable(int enable, uint timeoutMs = 0)
         {
-            return SetParam(ParamEnum.eProfileParamSoftLimitForEnable, enable);
+            return SetParam(ParamEnum.eProfileParamSoftLimitForEnable, enable, timeoutMs);
         }
-        public int SetReverseSoftEnable(int enable)
+        public int SetReverseSoftEnable(int enable, uint timeoutMs = 0)
         {
-            return SetParam(ParamEnum.eProfileParamSoftLimitRevEnable, enable);
+            return SetParam(ParamEnum.eProfileParamSoftLimitRevEnable, enable, timeoutMs);
         }
         public int GetForwardSoftLimit(out int forwardLimit)
         {
@@ -674,7 +706,7 @@ namespace CTRE
          * Change the periodMs of a TALON's status frame.  See kStatusFrame_* enums for
          * what's available.
          */
-        public int SetStatusFrameRate(UInt32 frameEnum, UInt32 periodMs)
+        public int SetStatusFrameRate(UInt32 frameEnum, UInt32 periodMs, uint timeoutMs = 0)
         {
             Codes retval = Codes.CAN_OK;
             ParamEnum paramEnum = 0;
@@ -705,6 +737,9 @@ namespace CTRE
                 case kStatusFrame_MotionProfile:
                     paramEnum = ParamEnum.eStatus9FrameRate;
                     break;
+                case kStatusFrame_MotionMagic:
+                    paramEnum = ParamEnum.eStatus10FrameRate;
+                    break;
                 default:
                     /* caller's request is not support, return an error code */
                     retval = Codes.CAN_INVALID_PARAM;
@@ -714,7 +749,7 @@ namespace CTRE
             if (retval == Codes.CAN_OK)
             {
                 /* paramEnum is updated, sent it out */
-                retval = (Codes)SetParamRaw(paramEnum, period);
+                retval = (Codes)SetParamRaw(paramEnum, period, timeoutMs);
             }
             return (int)retval;
         }
@@ -1545,7 +1580,7 @@ namespace CTRE
             return retval;
         }
         /** @param control mode specific output */
-        public int SetDemand24(Int32 param)
+        public int SetDemand24(Int32 param, Int32 controlmode)
         {
             int retval = CTRE.Native.CAN.GetSendBuffer(CONTROL_5 | _deviceNumber, ref _cache);
             if (retval != 0)
@@ -1553,18 +1588,24 @@ namespace CTRE
             byte H = (byte)(param >> 0x10);
             byte M = (byte)(param >> 0x08);
             byte L = (byte)(param);
+			/* demand */
             _cache &= ~(0xFFul << 16);
             _cache &= ~(0xFFul << 24);
             _cache &= ~(0xFFul << 32);
             _cache |= (UInt64)(H) << 16;
             _cache |= (UInt64)(M) << 24;
             _cache |= (UInt64)(L) << 32;
+            /* control mode */
+            controlmode = controlmode & 0xf;
+            _cache &= ~(((UInt64)0xf) << 52);
+            _cache |= ((UInt64)controlmode) << 52;
+
             CTRE.Native.CAN.Send(CONTROL_5 | _deviceNumber, _cache, 8, 0xFFFFFFFF);
             return retval;
         }
-        public int SetDemand(Int32 param)
+        public int SetDemand(Int32 param, Int32 controlmode)
         {
-            return SetDemand24(param);
+            return SetDemand24(param, controlmode);
         }
         /** SetOverrideLimitSwitchEn */
         public int SetOverrideLimitSwitchEn(Int32 param)
@@ -1658,6 +1699,55 @@ namespace CTRE
             CTRE.Native.CAN.Send(CONTROL_5 | _deviceNumber, _cache, 8, 0xFFFFFFFF);
             return retval;
         }
+        /**
+         * Set the throttle to feedforward. This takes effect during..
+         * Closed-loop modes only (and MP).
+         */
+        public int SetThrottleBump(Int32 throttleBump)
+        {
+            int retval = CTRE.Native.CAN.GetSendBuffer(CONTROL_5 | _deviceNumber, ref _cache);
+            if (retval != 0)
+                return retval;
+            byte H3 = (byte)((throttleBump >> 0x08) & 7);    /* bits [10:8] */
+            byte L  = (byte)(throttleBump);                  /* bits [7:0] */
+            _cache &= ~(0x07ul);
+            _cache &= ~(0xFFul << 8);
+            _cache |= (UInt64)(H3);
+            _cache |= (UInt64)(L) << 8;
+            CTRE.Native.CAN.Send(CONTROL_5 | _deviceNumber, _cache, 8, 0xFFFFFFFF);
+            return retval;
+        }
 
+        public int GetMotionMagic_ActiveTrajVelocity(out Int32 param)
+        {
+            int retval = CTRE.Native.CAN.Receive(STATUS_10 | _deviceNumber, ref _cache, ref _len);
+            byte H = (byte)(_cache >> 0x0);
+            byte L = (byte)(_cache >> 0x8);
+            Int32 raw = 0;
+            raw |= H;
+            raw <<= 8;
+            raw |= L;
+            raw <<= (32 - 16); /* sign extend */
+            raw >>= (32 - 16); /* sign extend */
+            param = (int)raw;
+            return retval;
+        }
+        public int GetMotionMagic_ActiveTrajPosition(out Int32 param)
+        {
+            int retval = CTRE.Native.CAN.Receive(STATUS_10 | _deviceNumber, ref _cache, ref _len);
+            byte H = (byte)(_cache >> 0x10);
+            byte M = (byte)(_cache >> 0x18);
+            byte L = (byte)(_cache >> 0x20);
+            Int32 raw = 0;
+            raw |= H;
+            raw <<= 8;
+            raw |= M;
+            raw <<= 8;
+            raw |= L;
+            raw <<= (32 - 24); /* sign extend */
+            raw >>= (32 - 24); /* sign extend */
+            param = (int)raw;
+            return retval;
+        }
     }
 }
