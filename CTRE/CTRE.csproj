@@ -77,7 +77,7 @@
     <Compile Include="CANBusDevice.cs" />
     <Compile Include="HERO.IO.cs" />
     <Compile Include="LowLevel_Pcm.cs" />
-    <Compile Include="PWMController.cs" />
+    <Compile Include="PWMMotorController.cs" />
     <Compile Include="UsbDeviceConnection.cs" />
     <Compile Include="GamepadValues.cs" />
     <Compile Include="ISingleGamepadValuesProvider.cs" />

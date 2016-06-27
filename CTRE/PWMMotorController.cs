@@ -4,14 +4,14 @@ using Microsoft.SPOT.Hardware;
 
 namespace CTRE
 {
-    public class PWMController
+    public class PWMMotorController
     {
         private PWM controller;
 
         //Parameters for PWM Class.
         //Units are in Microseconds.
         private Cpu.PWMChannel channel;
-        private uint period = 20000;
+        private uint period = 10000;
         private uint duration = 1500;
         private const PWM.ScaleFactor kScale = PWM.ScaleFactor.Microseconds;
         private const bool kInvertSignal = false;
@@ -21,11 +21,23 @@ namespace CTRE
 
         
         //Constructor for PWMController
-        public PWMController(Cpu.PWMChannel channel)
+        public PWMMotorController(Cpu.PWMChannel channel)
         {
             this.channel = channel;
 
             controller = new PWM(channel, period, duration, kScale, kInvertSignal);
+
+            controller.Start();
+        }
+
+        //Overloaded constructor for different periods
+        public PWMMotorController(Cpu.PWMChannel channel, uint periodMs)
+        {
+            this.channel = channel;
+
+            controller = new PWM(channel, period, duration, kScale, kInvertSignal);
+
+            SetPeriod(periodMs);
 
             controller.Start();
         }
@@ -50,7 +62,11 @@ namespace CTRE
 
         /*period input parameter is expected in milliseconds, as this is the standard   *
          * unit type expressed in data sheets.                                          */
-        public void SetPeriod(uint period)  { controller.Period = this.period = (period * 1000); }
+        public void SetPeriod(uint periodMs)
+        {
+            if (periodMs > 50) periodMs = 50;
+            controller.Period = this.period = (periodMs * 1000);
+        }
 
         public uint GetPeriod()  { return period; }
 
