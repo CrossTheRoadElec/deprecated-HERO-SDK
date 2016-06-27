@@ -41,6 +41,10 @@ namespace CTRE
                 public const Cpu.Pin Pin7 = (Cpu.Pin)0x14;
                 public const Cpu.Pin Pin8 = (Cpu.Pin)0x03;
                 public const Cpu.Pin Pin9 = (Cpu.Pin)0x08;
+
+                //public const Cpu.PWMChannel PWM_Pin7 = Cpu.PWMChannel.PWM_1;   //Not yet tested
+                //public const Cpu.PWMChannel PWM_Pin8 = Cpu.PWMChannel.PWM_3;   //Not yet tested
+                public const Cpu.PWMChannel PWM_Pin9 = Cpu.PWMChannel.PWM_2;
             }
             public static class Port4
             {
