@@ -75,6 +75,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="CANBusDevice.cs" />
+    <Compile Include="DriverModule.cs" />
     <Compile Include="HERO.IO.cs" />
     <Compile Include="LowLevel_Pcm.cs" />
     <Compile Include="UsbDeviceConnection.cs" />
