@@ -4,10 +4,34 @@ namespace CTRE
 {
     namespace HERO
     {
+        public static class IO
+        {
+            public static Port1Definition Port1 = new Port1Definition();
+
+            public static Port2Definition Port2 = new Port2Definition();
+
+            public static Port3Definition Port3 = new Port3Definition();
+
+            public static Port4Definition Port4 = new Port4Definition();
+
+            public static Port5Definition Port5 = new Port5Definition();
+
+            public static Port6Definition Port6 = new Port6Definition();
+
+            public static Port7Definition Port7 = new Port7Definition();
+
+            public static Port8Definition Port8 = new Port8Definition();
+        }
+
         public class PortDefinition
         {
             public char[] types;
             public int id;
+        }
+
+        public class ModuleBase
+        {
+            public readonly char kModulePortType;
         }
 
         public interface IPortGpio3
@@ -105,10 +129,18 @@ namespace CTRE
 
             public string UART { get { return "COM4"; } }
 
+            //This is to allow for variable selecting of pins
+            public readonly Cpu.Pin[] Pins = new Cpu.Pin[4];
+
             public Port1Definition()
             {
                 types = new char[] { 'A', 'U', 'S', 'X' };
                 id = 1;
+
+                Pins[0] = Pin3;
+                Pins[1] = Pin4;
+                Pins[2] = Pin5;
+                Pins[3] = Pin6;
             }
         }
 
@@ -122,10 +154,20 @@ namespace CTRE
             public readonly Cpu.Pin Pin8 = (Cpu.Pin)0x06;
             public readonly Cpu.Pin Pin9 = (Cpu.Pin)0x05;
 
+            //This is to allow for variable selecting of pins
+            public readonly Cpu.Pin[] Pins = new Cpu.Pin[6];
+
             public Port2Definition()
             {
                 types = new char[] { 'Z' };
                 id = 2;
+
+                Pins[0] = Pin4;
+                Pins[1] = Pin5;
+                Pins[2] = Pin6;
+                Pins[3] = Pin7;
+                Pins[4] = Pin8;
+                Pins[5] = Pin9;
             }
         }
 
@@ -143,10 +185,21 @@ namespace CTRE
             //public const Cpu.PWMChannel PWM_Pin8 = Cpu.PWMChannel.PWM_3;   //Not yet tested
             public Cpu.PWMChannel PWM_Pin9 { get { return Cpu.PWMChannel.PWM_2; } }
 
+            //This is to allow for variable selecting of pins
+            public readonly Cpu.Pin[] Pins = new Cpu.Pin[7];
+
             public Port3Definition()
             {
                 types = new char[] { 'P', 'Y' };
                 id = 3;
+
+                Pins[0] = Pin3;
+                Pins[1] = Pin4;
+                Pins[2] = Pin5;
+                Pins[3] = Pin6;
+                Pins[4] = Pin7;
+                Pins[5] = Pin8;
+                Pins[6] = Pin9;
             }
         }
 
@@ -164,10 +217,18 @@ namespace CTRE
 
             public string UART { get { return "COM2"; } }
 
+            //This is to allow for variable selecting of pins
+            public readonly Cpu.Pin[] Pins = new Cpu.Pin[4];
+
             public Port4Definition()
             {
                 types = new char[] { 'I', 'K', 'U', 'X' };
                 id = 4;
+
+                Pins[0] = Pin3;
+                Pins[1] = Pin4;
+                Pins[2] = Pin5;
+                Pins[3] = Pin6;
             }
         }
 
@@ -181,10 +242,21 @@ namespace CTRE
             public Cpu.Pin Pin8 { get { return (Cpu.Pin)0x2B; } }
             public Cpu.Pin Pin9 { get { return (Cpu.Pin)0x2C; } }
 
+            //This is to allow for variable selecting of pins
+            public readonly Cpu.Pin[] Pins = new Cpu.Pin[7];
+
             public Port5Definition()
             {
                 types = new char[] { 'F', 'Y' };
                 id = 5;
+
+                Pins[0] = Pin3;
+                Pins[1] = Pin4;
+                Pins[2] = Pin5;
+                Pins[3] = Pin6;
+                Pins[4] = Pin7;
+                Pins[5] = Pin8;
+                Pins[6] = Pin9;
             }
         }
 
@@ -202,10 +274,18 @@ namespace CTRE
 
             public string UART { get { return "COM6"; } }
 
+            //This is to allow for variable selecting of pins
+            public readonly Cpu.Pin[] Pins = new Cpu.Pin[4];
+
             public Port6Definition()
             {
                 types = new char[] { 'I', 'U', 'X' };
                 id = 6;
+
+                Pins[0] = Pin3;
+                Pins[1] = Pin4;
+                Pins[2] = Pin5;
+                Pins[3] = Pin6;
             }
         }
 
@@ -219,10 +299,21 @@ namespace CTRE
             public Cpu.Pin Pin8 { get { return (Cpu.Pin)0x3C; } }
             public Cpu.Pin Pin9 { get { return (Cpu.Pin)0x4B; } }
 
+            //This is to allow for variable selecting of pins
+            public readonly Cpu.Pin[] Pins = new Cpu.Pin[7];
+
             public Port7Definition()
             {
                 types = new char[] { 'Z' };
                 id = 7;
+
+                Pins[0] = Pin3;
+                Pins[1] = Pin4;
+                Pins[2] = Pin5;
+                Pins[3] = Pin6;
+                Pins[4] = Pin7;
+                Pins[5] = Pin8;
+                Pins[6] = Pin9;
             }
         }
 
@@ -242,30 +333,19 @@ namespace CTRE
             public Cpu.AnalogChannel Analog_Pin4 { get { return Cpu.AnalogChannel.ANALOG_4; } }
             public Cpu.AnalogChannel Analog_Pin5 { get { return Cpu.AnalogChannel.ANALOG_5; } }
 
+            //This is to allow for variable selecting of pins
+            public readonly Cpu.Pin[] Pins = new Cpu.Pin[4];
+
             public Port8Definition()
             {
                 types = new char[] { 'A', 'O', 'S', 'X' };
                 id = 8;
+
+                Pins[0] = Pin3;
+                Pins[1] = Pin4;
+                Pins[2] = Pin5;
+                Pins[3] = Pin6;
             }
-        }
-
-        public static class IO
-        {
-            public static Port1Definition Port1 = new Port1Definition();
-
-            public static Port2Definition Port2 = new Port2Definition();
-
-            public static Port3Definition Port3 = new Port3Definition();
-
-            public static Port4Definition Port4 = new Port4Definition();
-
-            public static Port5Definition Port5 = new Port5Definition();
-
-            public static Port6Definition Port6 = new Port6Definition();
-
-            public static Port7Definition Port7 = new Port7Definition();
-
-            public static Port8Definition Port8 = new Port8Definition();
         }
     }
 }
