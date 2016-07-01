@@ -92,6 +92,7 @@
     <Compile Include="TrajectoryBuffer.cs" />
     <Compile Include="UsbHostDevice.cs" />
     <Compile Include="SafeOutputPort.cs" />
+    <Compile Include="Utilities.cs" />
     <Compile Include="Watchdog.cs" />
   </ItemGroup>
   <ItemGroup>
