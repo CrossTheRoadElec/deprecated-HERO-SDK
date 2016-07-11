@@ -19,16 +19,16 @@ namespace CTRE
 
         public enum Codes
         {
-            CAN_OK = 0,
-            CAN_MSG_STALE = 1,
-            CAN_TX_FULL = -1,
-            CAN_INVALID_PARAM = -2,
-            CAN_MSG_NOT_FOUND = -3,
-            CAN_NO_MORE_TX_JOBS = -4,
-            CAN_NO_SESSIONS_AVAIL = -5,
-            CAN_OVERFLOW = -6,
-            CAN_GENERAL_ERROR = -100,
-            CTR_SigNotUpdated = -200,
+            CAN_OK = StatusCodes.OK,
+            CAN_MSG_STALE = StatusCodes.CAN_MSG_STALE,
+            CAN_TX_FULL = StatusCodes.CAN_TX_FULL,
+            CAN_INVALID_PARAM = StatusCodes.CAN_INVALID_PARAM,
+            CAN_MSG_NOT_FOUND = StatusCodes.CAN_MSG_NOT_FOUND,
+            CAN_NO_MORE_TX_JOBS = StatusCodes.CAN_NO_MORE_TX_JOBS,
+            CAN_NO_SESSIONS_AVAIL = StatusCodes.CAN_NO_SESSIONS_AVAIL,
+            CAN_OVERFLOW = StatusCodes.CAN_OVERFLOW,
+
+            CTR_SigNotUpdated = StatusCodes.SIG_NOT_UPDATED,
         };
     }
 }
