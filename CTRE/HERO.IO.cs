@@ -95,8 +95,8 @@ namespace CTRE
 
         public interface IPortPWM
         {
-//            Cpu.PWMChannel PWM_Pin7 { get; }
-//            Cpu.PWMChannel PWM_Pin8 { get; }
+            Cpu.PWMChannel PWM_Pin7 { get; }
+            Cpu.PWMChannel PWM_Pin8 { get; }
             Cpu.PWMChannel PWM_Pin9 { get; }
         }
 
@@ -181,9 +181,13 @@ namespace CTRE
             public Cpu.Pin Pin8 { get { return (Cpu.Pin)0x03; } }
             public Cpu.Pin Pin9 { get { return (Cpu.Pin)0x08; } }
 
-            //public const Cpu.PWMChannel PWM_Pin7 = Cpu.PWMChannel.PWM_1;   //Not yet tested
-            //public const Cpu.PWMChannel PWM_Pin8 = Cpu.PWMChannel.PWM_3;   //Not yet tested
+            public Cpu.PWMChannel PWM_Pin7 { get { return Cpu.PWMChannel.PWM_0; } }
+            public Cpu.PWMChannel PWM_Pin8 { get { return Cpu.PWMChannel.PWM_1; } }
             public Cpu.PWMChannel PWM_Pin9 { get { return Cpu.PWMChannel.PWM_2; } }
+
+            //These two PWM outputs aren't officially part of a P-port, but CTRE supports them.
+            public Cpu.PWMChannel PWM_Pin4 = Cpu.PWMChannel.PWM_3;
+            public Cpu.PWMChannel PWM_Pin6 = Cpu.PWMChannel.PWM_4;
 
             //This is to allow for variable selecting of pins
             public readonly Cpu.Pin[] Pins = new Cpu.Pin[7];
