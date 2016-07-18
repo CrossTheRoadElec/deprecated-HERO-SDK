@@ -38,7 +38,7 @@ namespace CTRE
 
         public static bool GetEnableBits(ref uint enabledBits)
         {
-            return CTRE.Native.Watchdog.GetEnableBits(ref enabledBits) == 0;
+            return CTRE.Native.Watchdog.GetEnableBits(ref enabledBits) == 1;
         }
     }
 }

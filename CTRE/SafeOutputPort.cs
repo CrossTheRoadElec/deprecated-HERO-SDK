@@ -25,9 +25,9 @@ namespace CTRE
          */
         public bool Write(bool state)
         {
-            if (_out != null)
+            if (_out != null && CTRE.Watchdog.IsEnabled())
             {
-                /* since the back-end may of disabled this output, attempt to re-enable */
+                /* since the back-end may have disabled this output, attempt to re-enable */
                 _out.Active = false;
                 _out.Active = true;
                 /* update the output latch */
