@@ -217,7 +217,7 @@ namespace CTRE
             if (param == false)
                 _cache &= ~(1ul << (16 + idx));
             else
-                _cache |= 1ul << 16;
+                _cache |= 1ul << (16 + idx);
             CTRE.Native.CAN.Send(CONTROL_1 | _deviceNumber, _cache, 8, 0xFFFFFFFF);
             return retval;
         }
