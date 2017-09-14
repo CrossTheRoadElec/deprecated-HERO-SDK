@@ -11,5 +11,6 @@ namespace CTRE
     public interface ISingleGamepadValuesProvider
     {
         int Get(ref GamepadValues toFill);
+        int Sync(ref GamepadValues toFill, uint rumbleL, uint rumbleR, uint ledCode, uint controlFlags);
     }
 }

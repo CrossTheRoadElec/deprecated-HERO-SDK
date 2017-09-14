@@ -3,7 +3,7 @@ using Microsoft.SPOT.Hardware;
 
 namespace CTRE
 {
-    class PWMSpeedController
+    public class PWMSpeedController
     {
         private PWM controller = null;
 
@@ -22,9 +22,6 @@ namespace CTRE
         //Constructor for PWMController
         public PWMSpeedController(Cpu.PWMChannel channel)
         {
-            CTRE.Native.Watchdog.RegisterSafeOutput(0);
-            CTRE.Native.Watchdog.RegisterSafePWMOutput(0);
-
             if (0 == CTRE.Native.Watchdog.RegisterSafePWMOutput((uint)channel))
             {
                 this.channel = channel;

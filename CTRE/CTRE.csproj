@@ -19,7 +19,7 @@
     <OutputPath>bin\Debug\</OutputPath>
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
+    <WarningLevel>3</WarningLevel>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>pdbonly</DebugType>
@@ -75,9 +75,15 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="CANBusDevice.cs" />
+    <Compile Include="DisplayModule.cs" />
     <Compile Include="DriverModule.cs" />
+    <Compile Include="ESP12F.cs" />
     <Compile Include="HERO.IO.cs" />
+    <Compile Include="IGadgeteerUartClient.cs" />
     <Compile Include="LowLevel_Pcm.cs" />
+    <Compile Include="ParamContainer.cs" />
+    <Compile Include="PigeonImu.cs" />
+    <Compile Include="PWMSpeedController.cs" />
     <Compile Include="StatusCodes.cs" />
     <Compile Include="UsbDeviceConnection.cs" />
     <Compile Include="GamepadValues.cs" />
@@ -100,7 +106,10 @@
       <SpecificVersion>False</SpecificVersion>
       <Private>False</Private>
     </Reference>
+    <Reference Include="Microsoft.SPOT.Graphics" />
     <Reference Include="Microsoft.SPOT.Hardware" />
+    <Reference Include="Microsoft.SPOT.Hardware.PWM" />
+    <Reference Include="Microsoft.SPOT.Hardware.SerialPort" />
     <Reference Include="Microsoft.SPOT.Native" />
   </ItemGroup>
   <Import Condition="EXISTS('$(NetMfTargetsBaseDir)$(TargetFrameworkVersion)\CSharp.Targets')" Project="$(NetMfTargetsBaseDir)$(TargetFrameworkVersion)\CSharp.Targets" />

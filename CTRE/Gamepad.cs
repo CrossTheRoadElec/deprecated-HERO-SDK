@@ -7,6 +7,11 @@ namespace CTRE
         private ISingleGamepadValuesProvider _provider;
         private GamepadValues _values = new GamepadValues();
 
+        private UInt32 _rumbleL = 0;
+        private UInt32 _rumbleR = 0;
+        private UInt32 _ledCode = 0;
+        private UInt32 _controlFlags = 0;
+
         public Gamepad(ISingleGamepadValuesProvider provider)
         {
             _provider = provider;
@@ -62,6 +67,63 @@ namespace CTRE
             if (code >= 0)
                 return UsbDeviceConnection.Connected;
             return UsbDeviceConnection.NotConnected;
+        }
+
+        /**
+         * Set the Right Rumble strength.
+		 * @param strength 0 for off, [1,255] 
+		 * 			for on with increasing strength.
+		 * @return int error code, 0 for success.
+         */
+        public int SetLeftRumble(byte strength)
+        {
+            _rumbleL = (uint)strength;
+            return _provider.Sync(ref _values, _rumbleL, _rumbleR, _ledCode, _controlFlags);
+        }
+        /**
+         * Set the Right Rumble strength.
+		 * @param strength 0 for off, [1,255] 
+		 * 			for on with increasing strength.
+		 * @return int error code, 0 for success.
+         */
+        public int SetRightRumble(byte strength)
+        {
+            _rumbleR = (uint)strength;
+            return _provider.Sync(ref _values, _rumbleL, _rumbleR, _ledCode, _controlFlags);
+        }
+        /**
+         * Set the Left/Right Rumble strength at the same time.
+		 * @param leftStrength 0 for off, [1,255] 
+		 * 			for on with increasing strength.
+		 * @param rightStrength 0 for off, [1,255] 
+		 * 			for on with increasing strength.
+		 * @return int error code, 0 for success.
+         */
+        public int SetRumble(byte leftStrength, byte rightStrength)
+        {
+            _rumbleL = (uint)leftStrength;
+            _rumbleR = (uint)rightStrength;
+            return _provider.Sync(ref _values, _rumbleL, _rumbleR, _ledCode, _controlFlags);
+        }
+        /**
+         * Set the Xbox LED code.
+		 * @param Valid values are [6,9] for the four LEDs.
+		 * @return int error code, 0 for success.
+         */
+        public int SetLEDCode(byte ledCode)
+        {
+            _ledCode = (uint)ledCode;
+            return _provider.Sync(ref _values, _rumbleL, _rumbleR, _ledCode, _controlFlags);
+        }
+        public int SetControlFlags(uint mask)
+        {
+            _controlFlags |= mask;
+            return _provider.Sync(ref _values, _rumbleL, _rumbleR, _ledCode, _controlFlags);
+        }
+        public int ClearControlFlags(uint mask)
+        {
+            _controlFlags &= ~mask;
+            return _provider.Sync(ref _values, _rumbleL, _rumbleR, _ledCode, _controlFlags);
         }
     }
 }

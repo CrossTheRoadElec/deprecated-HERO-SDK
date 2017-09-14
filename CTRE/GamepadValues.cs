@@ -13,6 +13,7 @@ namespace CTRE
         public UInt32 pid = 0;
         public int[] vendorSpecI = null;
         public float[] vendorSpecF = null;
+        public UInt32 flagBits = 0;
         
         public GamepadValues()
         {
@@ -38,6 +39,8 @@ namespace CTRE
             pid = rhs.pid;
             vendorSpecI = rhs.vendorSpecI;
             vendorSpecF = rhs.vendorSpecF;
+            flagBits = rhs.flagBits;
+            /* leave commands alone */
         }
 
         internal static GamepadValues ZeroGamepadValues = new GamepadValues();

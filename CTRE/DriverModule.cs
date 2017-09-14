@@ -14,7 +14,7 @@ namespace CTRE
                     public const bool pullUp = false;
                 }
 
-                public readonly char kModulePortType = 'Y';
+                public new readonly char kModulePortType = 'Y';
 
                 private PortDefinition port;
                 private OutputPort[] output = new OutputPort[7];
@@ -23,7 +23,7 @@ namespace CTRE
 
                 public DriverModule(PortDefinition port)
                 {
-                   if (Contains(port.types, kModulePortType))
+                   if (CTRE.Util.Contains(port.types, kModulePortType))
                     {
                         status = StatusCodes.OK;
                         this.port = port;
@@ -69,19 +69,6 @@ namespace CTRE
                     for (int i = 0; i < 6; i++)
                         outputStates[i] = false;
 
-                }
-
-                private bool Contains(char[] array, char item)
-                {
-                    bool found = false;
-
-                    foreach (char element in array)
-                    {
-                        if (element == item)
-                            found = true;
-                    }
-
-                    return found;
                 }
             }
         }

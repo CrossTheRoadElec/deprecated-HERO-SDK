@@ -111,7 +111,7 @@ namespace CTRE
     using TALON_Control_6_MotProfAddTrajPoint_huff0_t = UInt64;
     using TALON_Control_6_MotProfAddTrajPoint_t = UInt64;
 
-    public class LowLevel_TalonSrx : CANBusDevice
+    public class LowLevel_TalonSrx : CANBusDevice, IGadgeteerUartClient
     {
         const UInt32 STATUS_1 = 0x02041400;
         const UInt32 STATUS_2 = 0x02041440;
@@ -123,12 +123,14 @@ namespace CTRE
         const UInt32 STATUS_8 = 0x020415C0;
         const UInt32 STATUS_9 = 0x02041600;
         const UInt32 STATUS_10= 0x02041640;
+        const UInt32 STATUS_11 = 0x02041680;
 
         const UInt32 CONTROL_1 = 0x02040000;
         const UInt32 CONTROL_2 = 0x02040040;
         const UInt32 CONTROL_3 = 0x02040080;
         const UInt32 CONTROL_5 = 0x02040100;
         const UInt32 CONTROL_6 = 0x02040140;
+        const UInt32 CONTROL_7 = 0x02040180;
 
         const UInt32 PARAM_REQUEST = 0x02041800;
         const UInt32 PARAM_RESPONSE = 0x02041840;
@@ -274,12 +276,34 @@ namespace CTRE
             eMotMag_Accel = 122,
             eMotMag_VelCruise = 123,
             eStatus10FrameRate = 124, // TALON_Status_10_MotMag_100ms_t 
+            eCurrentLimThreshold = 125,
+            eCustomParam0 = 137,
+            eCustomParam1 = 138,
+            ePersStorageSaving = 139,
+			
+			eClearPositionOnLimitF = 144,
+			eClearPositionOnLimitR = 145,
+            eNominalBatteryVoltage = 146,
+            eSampleVelocityPeriod = 147,
+            eSampleVelocityWindow = 148,
         };
 
         private UInt64 _cache;
         private UInt32 _len;
         private UInt32 _can_h = 0;
         private int _can_stat = 0;
+
+        private bool _hasOutputData = false;
+
+        private struct ResetStats
+        {
+            public Int32 resetCount;
+            public Int32 resetFlags;
+            public Int32 firmVers;
+            public bool hasReset;
+        };
+        ResetStats _resetStats = new ResetStats();
+
         //--------------------- Buffering Motion Profile ---------------------------//
 
         /**
@@ -513,6 +537,15 @@ namespace CTRE
                         }
                     }
                     break;
+                case ParamEnum.eNominalBatteryVoltage:
+                    rawbits = (int)(value * 256f);
+                    /* negative or zero disables feature */
+                    if (rawbits < 0)
+                        rawbits = 0;
+                    /* max value is 255.0V */
+                    if (rawbits > 0xFF00)
+                        rawbits = 0xFF00;
+                    break;
                 default: /* everything else is integral */
                     rawbits = (Int32)value;
                     break;
@@ -540,6 +573,9 @@ namespace CTRE
                     break;
                 case ParamEnum.eProfileParamVcompRate:
                     value = ((float)rawbits) * FXP_TO_FLOAT_0_8;
+                    break;
+                case ParamEnum.eNominalBatteryVoltage:
+                    value = ((float)rawbits) * (1f/256f);
                     break;
                 default: /* everything else is integral */
                     value = (float)rawbits;
@@ -1344,12 +1380,15 @@ namespace CTRE
             int retval = CTRE.Native.CAN.Receive(STATUS_2 | _deviceNumber, ref _cache, ref _len);
             byte H = (byte)(_cache >> 24);
             byte L = (byte)(_cache >> 32);
+            int velDiv4 = (int)((_cache >> 60) & 1);
             Int32 raw = 0;
             raw |= H;
             raw <<= 8;
             raw |= L;
             raw <<= (32 - 16); /* sign extend */
             raw >>= (32 - 16); /* sign extend */
+            if (velDiv4 == 1)
+                raw *= 4;
             param = (int)raw;
             return retval;
         }
@@ -1493,28 +1532,96 @@ namespace CTRE
             param = 0.05F * raw + 4F;
             return retval;
         }
-        public int GetResetCount(out Int32 param)
+        public int GetClearPosOnIdx(out bool param)
+        {
+            int retval = CTRE.Native.CAN.Receive(STATUS_4 | _deviceNumber, ref _cache, ref _len);
+            byte L = (byte)(_cache >> 59);
+            L &= 1;
+            param = (L == 1);
+            return retval;
+        }
+        public int GetClearPosOnLimR(out bool param)
+        {
+            int retval = CTRE.Native.CAN.Receive(STATUS_4 | _deviceNumber, ref _cache, ref _len);
+            byte L = (byte)(_cache >> 60);
+            L &= 1;
+            param = (L == 1);
+            return retval;
+        }
+        public int GetClearPosOnLimF(out bool param)
+        {
+            int retval = CTRE.Native.CAN.Receive(STATUS_4 | _deviceNumber, ref _cache, ref _len);
+            byte L = (byte)(_cache >> 60);
+            L &= 1;
+            param = (L == 1);
+            return retval;
+        }
+
+        /**
+         * Polls status5 frame, which is only transmitted on motor controller boot.
+         * @return error code.
+         */
+        private int GetStatus5()
         {
             int retval = CTRE.Native.CAN.Receive(STATUS_5 | _deviceNumber, ref _cache, ref _len);
-            byte H = (byte)(_cache >> 0);
-            byte L = (byte)(_cache >> 8);
-            Int32 raw = 0;
-            raw |= H;
-            raw <<= 8;
-            raw |= L;
-            param = (int)raw;
+            if(retval == 0)
+            {
+                byte H,L;
+                Int32 raw;
+                /* frame has been received, therefore motor contorller has reset at least once */
+                _resetStats.hasReset = true;
+                /* reset count */
+                H = (byte)(_cache >> 0);
+                L = (byte)(_cache >> 8);
+                raw = H<<8 | L;
+                _resetStats.resetCount = (int)raw;
+                /* reset flags */
+                H = (byte)(_cache >> 16);
+                L = (byte)(_cache >> 24);
+                raw = H << 8 | L;
+                _resetStats.resetFlags = (int)raw;
+                /* firmVers */
+                H = (byte)(_cache >> 32);
+                L = (byte)(_cache >> 40);
+                raw = H << 8 | L;
+                _resetStats.firmVers = (int)raw;
+            }
+            return retval;
+        }
+        public int GetResetCount(out Int32 param)
+        {
+            /* repoll status frame */
+            int retval = GetStatus5();
+            param = _resetStats.resetCount;
             return retval;
         }
         public int GetResetFlags(out Int32 param)
         {
-            int retval = CTRE.Native.CAN.Receive(STATUS_5 | _deviceNumber, ref _cache, ref _len);
-            byte H = (byte)(_cache >> 16);
-            byte L = (byte)(_cache >> 24);
-            Int32 raw = 0;
-            raw |= H;
-            raw <<= 8;
-            raw |= L;
-            param = (int)raw;
+            /* repoll status frame */
+            int retval = GetStatus5();
+            param = _resetStats.resetFlags;
+            return retval;
+        }
+        /**
+		 * @param param holds the version of the Talon.  Talon must be powered cycled at least once.
+		 */
+        public int GetFirmVers(out Int32 param)
+        {
+            /* repoll status frame */
+            int retval = GetStatus5();
+            param = _resetStats.firmVers;
+            return retval;
+        }
+        /**
+         * @return true iff a reset has occured since last call.
+         */
+        public bool HasResetOccured()
+        {
+            /* repoll status frame, ignore return since hasReset is explicitly tracked */
+            GetStatus5();
+            /* get-then-clear reset flag */
+            bool retval = _resetStats.hasReset;
+            _resetStats.hasReset = false;
             return retval;
         }
         public int GetPulseWidthPosition(out Int32 param)
@@ -1551,23 +1658,6 @@ namespace CTRE
         public int GetPulseWidthRiseToRiseUs(out Int32 param)
         {
             int retval = CTRE.Native.CAN.Receive(STATUS_8 | _deviceNumber, ref _cache, ref _len);
-            byte H = (byte)(_cache >> 32);
-            byte L = (byte)(_cache >> 40);
-            Int32 raw = 0;
-            raw |= H;
-            raw <<= 8;
-            raw |= L;
-            raw <<= (32 - 16); /* sign extend */
-            raw >>= (32 - 16); /* sign extend */
-            param = (int)raw;
-            return retval;
-        }
-        /**
-		 * @param param holds the version of the Talon.  Talon must be powered cycled at least once.
-		 */
-        public int GetFirmVers(out Int32 param)
-        {
-            int retval = CTRE.Native.CAN.Receive(STATUS_5 | _deviceNumber, ref _cache, ref _len);
             byte H = (byte)(_cache >> 32);
             byte L = (byte)(_cache >> 40);
             Int32 raw = 0;
@@ -1747,6 +1837,106 @@ namespace CTRE
             raw <<= (32 - 24); /* sign extend */
             raw >>= (32 - 24); /* sign extend */
             param = (int)raw;
+            return retval;
+        }
+        public int SetCurrentLimEnable(bool bEnableCurrLim)
+        {
+            int retval = CTRE.Native.CAN.GetSendBuffer(CONTROL_5 | _deviceNumber, ref _cache);
+            if (retval != 0)
+                return retval;
+            if (bEnableCurrLim)
+                _cache |= (UInt64)(0x40);
+            else
+                _cache &= ~(0xC0ul);
+            CTRE.Native.CAN.Send(CONTROL_5 | _deviceNumber, _cache, 8, 0xFFFFFFFF);
+            return retval;
+        }
+
+        public int SetDataPortOutputPeriodMs(uint periodMs)
+        {
+            if (!_hasOutputData) { CTRE.Native.CAN.Send(CONTROL_7 | _deviceNumber, 0x00, 8, 10); }
+            int retval = CTRE.Native.CAN.GetSendBuffer(CONTROL_7 | _deviceNumber, ref _cache);
+            if (retval != 0)
+                return retval;
+            byte P = (byte)(periodMs);
+            _cache &= ~(0xFFul << 48);
+            _cache |= (UInt64)(P) << 48;
+            CTRE.Native.CAN.Send(CONTROL_7 | _deviceNumber, _cache, 8, 0xFFFFFFFF);
+            return retval;
+        }
+
+        public int SetDataPortOutputEnable(int idx, bool enable)
+        {
+            if(idx < 1 || idx > 6) { return StatusCodes.CAN_INVALID_PARAM; }
+            int retval = CTRE.Native.CAN.GetSendBuffer(CONTROL_7 | _deviceNumber, ref _cache);
+            if (retval != 0)
+                return retval;
+            byte E = 0;
+            E |= (byte)((enable ? 1 : 0) << ((idx+2) - 1));// idx of 1 is ch. 3, idx of 6 is ch. 8
+            _cache &= ~((UInt64)(E) << 56);
+            _cache |= (UInt64)(E) << 56;
+            CTRE.Native.CAN.Send(CONTROL_7 | _deviceNumber, _cache, 8, 0xFFFFFFFF);
+            return retval;
+        }
+
+        public int SetDataPortOutputOnTimeMs(int idx, int onTimeMs)
+        {
+            int retval = CTRE.Native.CAN.GetSendBuffer(CONTROL_7 | _deviceNumber, ref _cache);
+            if (retval != 0)
+                return retval;
+            if (idx < 1 || idx > 6)
+                return StatusCodes.CAN_INVALID_PARAM;
+            byte T = (byte)(onTimeMs);
+            _cache &= ~(0xFFul << ((idx-1) * 8));
+            _cache |= (UInt64)(T) << ((idx - 1) * 8);
+            CTRE.Native.CAN.Send(CONTROL_7 | _deviceNumber, _cache, 8, 0xFFFFFFFF);
+            return retval;
+        }
+
+        public int SetPersistentStorageWriteTimeout(uint persStorageWriteTimeoutMs, uint timeoutMs = 0)
+        {
+            return SetParam(ParamEnum.ePersStorageSaving, persStorageWriteTimeoutMs, timeoutMs);
+        }
+
+        public int GetGadgeteerStatus(out GadgeteerProxyType type, out GadgeteerConnection connection, out int bitrate, out int resetCount)
+        {
+            int retval = CTRE.Native.CAN.Receive(STATUS_11 | _deviceNumber, ref _cache, ref _len);
+            byte b0 = (byte)(_cache >> 0x0);
+            byte b1 = (byte)(_cache >> 0x8);
+            byte b2 = (byte)(_cache >> 0x8);
+            byte b3 = (byte)(_cache >> 0x8);
+            byte b8 = (byte)(_cache >> 0x8);
+
+            type = (GadgeteerProxyType)(b0);
+            switch ((GadgeteerState)(b1 & 0xf))
+            {
+                case GadgeteerState.GadState_WaitChirp1:
+                    connection = GadgeteerConnection.NotConnected;
+                    break;
+                case GadgeteerState.GadState_WaitBLInfo:
+                case GadgeteerState.GadState_WaitBitrateResp:
+                case GadgeteerState.GadState_WaitSwitchDelay:
+                case GadgeteerState.GadState_WaitChirp2:
+                    connection = GadgeteerConnection.Connecting;
+                    break;
+                case GadgeteerState.GadState_Connected_Idle:
+                case GadgeteerState.GadState_Connected_ReqChirp:
+                case GadgeteerState.GadState_Connected_RespChirp:
+                case GadgeteerState.GadState_Connected_ReqCanBus:
+                case GadgeteerState.GadState_Connected_RespCanBus:
+                case GadgeteerState.GadState_Connected_RespIsoThenChirp:
+                case GadgeteerState.GadState_Connected_RespIsoThenCanBus:
+                    connection = GadgeteerConnection.Connected;
+                    break;
+                default:
+                    connection = GadgeteerConnection.NotConnected;
+                    break;
+            }
+            bitrate = b2;
+            bitrate <<= 8;
+            bitrate |= b3;
+            resetCount = (sbyte)b8;
+
             return retval;
         }
     }

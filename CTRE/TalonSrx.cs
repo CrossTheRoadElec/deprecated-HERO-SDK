@@ -5,7 +5,7 @@ using Microsoft.SPOT.Hardware;
 
 namespace CTRE
 {
-    public class TalonSrx
+    public class TalonSrx : IGadgeteerUartClient
     {
         public enum Faults
         {
@@ -77,8 +77,8 @@ namespace CTRE
             AnalogEncoder = 3,
             EncRising = 4,
             EncFalling = 5,
-            CtreMagEncoder_Relative = 6, //!< Cross The Road Electronics Magnetic Encoder in Absolute/PulseWidth Mode
-            CtreMagEncoder_Absolute = 7, //!< Cross The Road Electronics Magnetic Encoder in Relative/Quadrature Mode
+            CtreMagEncoder_Relative = 6, //!< Cross The Road Electronics Magnetic Encoder in Relative/Quadrature Mode
+            CtreMagEncoder_Absolute = 7, //!< Cross The Road Electronics Magnetic Encoder in Absolute/PulseWidth Mode
             PulseWidth = 8,
         };
         /**
@@ -299,6 +299,7 @@ namespace CTRE
 
         bool m_isInverted;
 
+        UInt32 _deviceNumber;
         /**
 		 * Number of adc engineering units per 0 to 3.3V sweep.
 		 * This is necessary for scaling Analog Position in rotations/RPM.
@@ -327,9 +328,18 @@ namespace CTRE
          */
         public TalonSrx(int deviceNumber, bool externalEnable = false)
         {
+            _deviceNumber = (UInt32)deviceNumber;
             m_impl = new CTRE.LowLevel_TalonSrx((ushort)deviceNumber, externalEnable);
             ApplyControlMode(m_controlMode);
             m_impl.SetProfileSlotSelect(m_profile);
+        }
+        /// <summary>
+        /// Get the device number this Talon was constructed with.
+        /// </summary>
+        /// <returns>Device number</returns>
+        public UInt32 GetDeviceNumber()
+        {
+            return _deviceNumber;
         }
         /**
          * Gets the current status of the Talon (usually a sensor value).
@@ -387,7 +397,7 @@ namespace CTRE
          * In PercentVbus, the output is between -1.0 and 1.0, with 0.0 as stopped.
          * In Voltage mode, output value is in volts.
          * In Current mode, output value is in amperes.
-         * In Speed mode, output value is in position change / 10ms.
+         * In Speed mode, output value is in position change / 100ms.
          * In Position mode, output value is in encoder ticks or an analog value,
          *   depending on the sensor.
          * In Follower mode, the output value is the integer device ID of the talon to
@@ -854,7 +864,8 @@ namespace CTRE
             {
                 param = LowLevel_TalonSrx.ParamEnum.eProfileParamSlot1_AllowableClosedLoopErr;
             }
-            else {
+            else
+            {
                 param = LowLevel_TalonSrx.ParamEnum.eProfileParamSlot0_AllowableClosedLoopErr;
             }
             /* send allowable close loop er in native units */
@@ -1024,7 +1035,8 @@ namespace CTRE
                     {
                         /* we're not getting status info, signal unknown status */
                     }
-                    else {
+                    else
+                    {
                         /* param is updated */
                         if (param != 0)
                         {
@@ -1032,7 +1044,8 @@ namespace CTRE
                               generates a pulse waveform.*/
                             retval = FeedbackDeviceStatus.FeedbackStatusPresent;
                         }
-                        else {
+                        else
+                        {
                             /* no pulse present, sensor disconnected */
                             retval = FeedbackDeviceStatus.FeedbackStatusNotPresent;
                         }
@@ -1092,6 +1105,39 @@ namespace CTRE
             int status = m_impl.GetLimitSwitchClosedRev(out retval); /* rename this func, '1' => open, '0' => closed */
             HandleStatus(status);
             return retval ? false : true;
+        }
+        /**
+         * @return '1' iff ClearPosOnIdx is enabled, 0 iff setting is disabled.
+         * This function works regardless if limit switch feature is enabled.
+         */
+        public bool IsZeroSensorPositionOnOdxEnabled()
+        {
+            bool retval;
+            int status = m_impl.GetClearPosOnIdx(out retval);
+            HandleStatus(status);
+            return retval;
+        }
+        /**
+         * @return '1' iff ClearPosOnLimR is enabled, 0 iff setting is disabled.
+         * This function works regardless if limit switch feature is enabled.
+         */
+        public bool IsZeroSensorPositionOnReverseLimitEnabled()
+        {
+            bool retval;
+            int status = m_impl.GetClearPosOnLimR(out retval);
+            HandleStatus(status);
+            return retval;
+        }
+        /**
+         * @return '1' iff ClearPosOnLimF is enabled, 0 iff setting is disabled.
+         * This function works regardless if limit switch feature is enabled.
+         */
+        public bool IsZeroSensorPositionOnForwardLimitEnabled()
+        {
+            bool retval;
+            int status = m_impl.GetClearPosOnLimF(out retval);
+            HandleStatus(status);
+            return retval;
         }
         /*
          * Simple accessor for tracked rise eventso index pin.
@@ -1250,8 +1296,21 @@ namespace CTRE
             /* Caller is expressing ramp as Voltage per sec, assuming 12V is full.
                     Talon's throttle ramp is in dThrot/d10ms.  1023 is full fwd, -1023 is
                full rev. */
-            float rampRatedThrotPer10ms = (rampRate * 1023.0f / 12.0f) / 100f;
-            int status = m_impl.SetRampThrottle((int)rampRatedThrotPer10ms);
+            int rampRatedThrotPer10ms = 0;
+            if (rampRate <= 0)
+            {
+                /* caller wants to disable feature */
+            }
+            else
+            {
+                /* desired ramp rate is positive and nonzero */
+                rampRatedThrotPer10ms = (int)((rampRate * 1023.0f / 12.0f) / 100f);
+                if (rampRatedThrotPer10ms == 0)
+                    rampRatedThrotPer10ms = 1; /* slowest ramp possible */
+                else if (rampRatedThrotPer10ms > 255)
+                    rampRatedThrotPer10ms = 255; /* fastest nonzero ramp */
+            }
+            int status = m_impl.SetRampThrottle(rampRatedThrotPer10ms);
             HandleStatus(status);
         }
         public void SetVoltageCompensationRampRate(float rampRate)
@@ -1578,14 +1637,16 @@ namespace CTRE
             /* send the request frame */
             int status = m_impl.RequestParam((LowLevel_TalonSrx.ParamEnum)paramEnum);
             HandleStatus(status);
-            if (status != CAN_OK) {
+            if (status != CAN_OK)
+            {
                 retval = false;
             }
             System.Threading.Thread.Sleep(kDelayForSolicitedSignalsMs); /* small yield for getting response */
                                                                         /* get the last received update */
             status = m_impl.GetParamResponse((LowLevel_TalonSrx.ParamEnum)paramEnum, out dvalue);
             HandleStatus(status);
-            if (status != CAN_OK) {
+            if (status != CAN_OK)
+            {
                 retval = false;
             }
             return retval;
@@ -1642,7 +1703,8 @@ namespace CTRE
             {
                 /* we already are in this mode, don't perform disable workaround */
             }
-            else {
+            else
+            {
                 ApplyControlMode(mode);
             }
         }
@@ -1699,7 +1761,8 @@ namespace CTRE
                         {
                             /* already deduced the scalar above, we're done. */
                         }
-                        else {
+                        else
+                        {
                             /* we couldn't deduce the scalar just based on the selection */
                             if (0 == m_codesPerRev)
                             {
@@ -1707,7 +1770,8 @@ namespace CTRE
                                   is just using engineering units so fall to the
                                   bottom of this func.*/
                             }
-                            else {
+                            else
+                            {
                                 /* Talon expects PPR units */
                                 retval = qeiPulsePerCount * m_codesPerRev;
                                 scalingAvail = true;
@@ -1723,7 +1787,8 @@ namespace CTRE
                           is just using engineering units so fall to the
                           bottom of this func.*/
                     }
-                    else {
+                    else
+                    {
                         /* Talon expects PPR units */
                         retval = 1 * m_codesPerRev;
                         scalingAvail = true;
@@ -1737,7 +1802,8 @@ namespace CTRE
                           is just using engineering units so fall to the
                           bottom of this func.*/
                     }
-                    else {
+                    else
+                    {
                         retval = (float)kNativeAdcUnitsPerRotation / m_numPotTurns;
                         scalingAvail = true;
                     }
@@ -1852,12 +1918,160 @@ namespace CTRE
                 ConfigSetParameter(CTRE.LowLevel_TalonSrx.ParamEnum.eQuadIdxPolarity, risingEdge ? 1 : 0, timeoutMs);
                 ConfigSetParameter(CTRE.LowLevel_TalonSrx.ParamEnum.eClearPositionOnIdx, 1, timeoutMs);
             }
-            else {
+            else
+            {
                 /* disable the feature first, then update the edge polarity. */
                 ConfigSetParameter(CTRE.LowLevel_TalonSrx.ParamEnum.eClearPositionOnIdx, 0, timeoutMs);
                 ConfigSetParameter(CTRE.LowLevel_TalonSrx.ParamEnum.eQuadIdxPolarity, risingEdge ? 1 : 0, timeoutMs);
             }
         }
+        /**
+         * Enables Talon SRX to automatically zero the Sensor Position whenever an
+         * edge is detected on the Forward Limit Switch signal.
+         * @param enable     boolean input, pass true to enable feature or false to disable.
+         */
+		 public void EnableZeroSensorPositionOnForwardLimit(bool enable, uint timeoutMs = 0)
+		 {
+			 ConfigSetParameter(CTRE.LowLevel_TalonSrx.ParamEnum.eClearPositionOnLimitF, enable ? 1 : 0, timeoutMs);
+		 }
+		 /**
+         * Enables Talon SRX to automatically zero the Sensor Position whenever an
+         * edge is detected on the Reverse Limit Switch signal.
+         * @param enable     boolean input, pass true to enable feature or false to disable.
+         */
+		 public void EnableZeroSensorPositionOnReverseLimit(bool enable, uint timeoutMs = 0)
+		 {
+			 ConfigSetParameter(CTRE.LowLevel_TalonSrx.ParamEnum.eClearPositionOnLimitR, enable ? 1 : 0, timeoutMs);
+        }
+        /**
+         * @param voltage       Motor voltage to output when closed loop features are being used (Position,
+         *                      Speed, Motion Profile, Motion Magic, etc.) in volts.
+         *                      Pass 0 to disable feature.  Input should be within [0.0 V,255.0 V]
+         * @param timeoutMs     Optional integer input for a blocking timeout to wait for transmit.
+         */
+        public void SetNominalClosedLoopVoltage(float voltage, uint timeoutMs = 0)
+        {
+            m_impl.SetParam(LowLevel_TalonSrx.ParamEnum.eNominalBatteryVoltage, voltage, timeoutMs);
+        }
+        /**
+         * Disables the nominal closed loop voltage compensation.
+         * Same as calling SetNominalClosedLoopVoltage(0).
+         * @param timeoutMs     Optional integer input for a blocking timeout to wait for transmit.
+         */
+        public void DisableNominalClosedLoopVoltage(uint timeoutMs = 0)
+        {
+            SetNominalClosedLoopVoltage(0f, timeoutMs);
+        }
+        /**
+         * @return the currently selected nominal closed loop voltage. Zero (Default) means feature is disabled.
+         */
+        public float GetNominalClosedLoopVoltage()
+        {
+            int status = m_impl.RequestParam(LowLevel_TalonSrx.ParamEnum.eNominalBatteryVoltage);
+            HandleStatus(status);
+
+            System.Threading.Thread.Sleep(kDelayForSolicitedSignalsMs); /* small yield for getting response */
+
+            float retval;
+            status = m_impl.GetParamResponse(LowLevel_TalonSrx.ParamEnum.eNominalBatteryVoltage, out retval);
+            HandleStatus(status);
+
+            return retval;
+        }
+
+        public enum VelocityMeasurementPeriod
+        {
+            Period_1Ms = 1,
+            Period_2Ms = 2,
+            Period_5Ms = 5,
+            Period_10Ms = 10,
+            Period_20Ms = 20,
+            Period_25Ms = 25,
+            Period_50Ms = 50,
+            Period_100Ms = 100,
+        };
+        /**
+         * Sets the duration of time that the Talon measures for each velocity measurement (which occures at each 1ms process loop).
+         * The default value is 100, which means that every process loop (1ms), the Talon will measure the change in position
+         * between now and 100ms ago, and will insert into a rolling average.
+         *
+         * Decreasing this from the default (100ms) will yield a less-resolute measurement since there is less time for the sensor to change.
+         * This will be perceived as increased granularity in the measurement (or stair-stepping).  But doing so will also decrease the latency 
+         * between sensor motion and measurement.
+         * 
+         * Regardles of this setting value, native velocity units are still in change-in-sensor-per-100ms.
+         * 
+         * @param period      Support period enum.  Curent valid values are 1,2,5,10,20,25,50, or 100ms.
+         * @param timeoutMs     Optional integer input for a blocking timeout to wait for transmit.
+         */
+        public void SetVelocityMeasurementPeriod(VelocityMeasurementPeriod period, uint timeoutMs = 0)
+        {
+            m_impl.SetParam(LowLevel_TalonSrx.ParamEnum.eSampleVelocityPeriod, (int)period, timeoutMs);
+        }
+        /**
+         * Sets the window size of the rolling average used in velocity measurement.
+         * The default value is 64, which means that every process loop (1ms), the Talon will insert a velocity measurement 
+         * into a windowed averager with a history of 64 samples.
+         * Each sample is inserted every 1ms regardless of what Period is selected. 
+         * As a result the window is practically in ms units.
+         * 
+         * @param windowSize    Window size of rolling average.
+         * @param timeoutMs     Optional integer input for a blocking timeout to wait for transmit.
+         */
+        public void SetVelocityMeasurementWindow(UInt32 windowSize, uint timeoutMs = 0)
+        {
+            m_impl.SetParam(LowLevel_TalonSrx.ParamEnum.eSampleVelocityWindow, (int)windowSize, timeoutMs);
+        }
+
+        public int GetVelocityMeasurementPeriod(out VelocityMeasurementPeriod period)
+        {
+            int status = m_impl.RequestParam(LowLevel_TalonSrx.ParamEnum.eSampleVelocityPeriod);
+            HandleStatus(status);
+
+            System.Threading.Thread.Sleep(kDelayForSolicitedSignalsMs); /* small yield for getting response */
+
+            int rawValue;
+            status = m_impl.GetParamResponseInt32(LowLevel_TalonSrx.ParamEnum.eSampleVelocityPeriod, out rawValue);
+            HandleStatus(status);
+
+            period = (VelocityMeasurementPeriod)rawValue;
+
+            if (status == StatusCodes.OK)
+            {
+                switch (period)
+                {
+                    case VelocityMeasurementPeriod.Period_1Ms:
+                    case VelocityMeasurementPeriod.Period_2Ms:
+                    case VelocityMeasurementPeriod.Period_5Ms:
+                    case VelocityMeasurementPeriod.Period_10Ms:
+                    case VelocityMeasurementPeriod.Period_20Ms:
+                    case VelocityMeasurementPeriod.Period_25Ms:
+                    case VelocityMeasurementPeriod.Period_50Ms:
+                    case VelocityMeasurementPeriod.Period_100Ms:
+                        break;
+                    default:
+                        status = StatusCodes.CAN_INVALID_PARAM;
+                        break;
+                }
+            }
+            return status;
+        }
+
+        public int GetVelocityMeasurementWindow(out UInt32 window)
+        {
+            int status = m_impl.RequestParam(LowLevel_TalonSrx.ParamEnum.eSampleVelocityPeriod);
+            HandleStatus(status);
+
+            System.Threading.Thread.Sleep(kDelayForSolicitedSignalsMs); /* small yield for getting response */
+
+            int rawValue;
+            status = m_impl.GetParamResponseInt32(LowLevel_TalonSrx.ParamEnum.eSampleVelocityWindow, out rawValue);
+            HandleStatus(status);
+            window = (UInt32)rawValue;
+
+            return status;
+        }
+
         /**
          * Calling application can opt to speed up the handshaking between the robot API and the Talon to increase the
          * download rate of the Talon's Motion Profile.  Ideally the period should be no more than half the period
@@ -2046,6 +2260,78 @@ namespace CTRE
 
             return ScaleNativeUnitsToRpm(m_feedbackDevice, (Int32)retval);
         }
+
+        public int SetCurrentLimit(uint amps, uint timeoutMs = 0)
+        {
+            return ConfigSetParameter(LowLevel_TalonSrx.ParamEnum.eCurrentLimThreshold, amps, timeoutMs);
+        }
+        public int EnableCurrentLimit(bool enable)
+        {
+            return m_impl.SetCurrentLimEnable(enable);
+        }
+        public int SetDataPortOutputPeriod(uint periodMs)
+        {
+            int status = m_impl.SetDataPortOutputPeriodMs(periodMs);
+            HandleStatus(status);
+            return status;
+        }
+        public int SetDataPortOutputEnable(int idx, bool enable)
+        {
+            int status = m_impl.SetDataPortOutputEnable(idx, enable);
+            HandleStatus(status);
+            return status;
+        }
+        public int SetDataPortOutput(int idx, int onTimeMs)
+        {
+            int status = m_impl.SetDataPortOutputOnTimeMs(idx, onTimeMs);
+            HandleStatus(status);
+            return status;
+        }
+        /**
+         * @return true iff a reset has occured since last call.
+         */
+        public bool HasResetOccured()
+        {
+            return m_impl.HasResetOccured();
+        }
+        public int GetCustomParam0(out Int32 value)
+        {
+            int status = m_impl.RequestParam(LowLevel_TalonSrx.ParamEnum.eCustomParam0);
+            HandleStatus(status);
+            System.Threading.Thread.Sleep(kDelayForSolicitedSignalsMs); /* small yield for getting response */
+            status = m_impl.GetParamResponseRaw(LowLevel_TalonSrx.ParamEnum.eCustomParam0, out value);
+            return HandleStatus(status);
+        }
+        public int GetCustomParam1(out Int32 value)
+        {
+            int status = m_impl.RequestParam(LowLevel_TalonSrx.ParamEnum.eCustomParam1);
+            HandleStatus(status);
+            System.Threading.Thread.Sleep(kDelayForSolicitedSignalsMs); /* small yield for getting response */
+            status = m_impl.GetParamResponseRaw(LowLevel_TalonSrx.ParamEnum.eCustomParam1, out value);
+            return HandleStatus(status);
+        }
+        public int IsPersStorageSaving(out bool isSaving)
+        {
+            int temp;
+            int status = m_impl.RequestParam(LowLevel_TalonSrx.ParamEnum.ePersStorageSaving);
+            HandleStatus(status);
+            System.Threading.Thread.Sleep(kDelayForSolicitedSignalsMs); /* small yield for getting response */
+            status = m_impl.GetParamResponseRaw(LowLevel_TalonSrx.ParamEnum.ePersStorageSaving, out temp);
+            /* default to true if value is not sensble */
+            isSaving = true;
+            if (status == 0 && (temp == 0))
+                isSaving = false;
+            return HandleStatus(status);
+        }
+        public int SetCustomParam0(Int32 value, uint timeoutMs = 0)
+        {
+            return m_impl.SetParamRaw(LowLevel_TalonSrx.ParamEnum.eCustomParam0, value, timeoutMs);
+        }
+        public int SetCustomParam1(Int32 value, uint timeoutMs = 0)
+        {
+            return m_impl.SetParamRaw(LowLevel_TalonSrx.ParamEnum.eCustomParam1, value, timeoutMs);
+        }
+
         /**
         * Common interface for inverting direction of a speed controller.
         * Only works in PercentVbus, speed, and Voltage modes.
@@ -2065,5 +2351,19 @@ namespace CTRE
          * @return low level object for advanced control.
          */
         public CTRE.LowLevel_TalonSrx GetLowLevelObject() { return m_impl; }
+
+        /// <summary>
+        /// GetStatus on the gadgeteer UART connection to any intelligent Gadgeteer device (such as Pigeon).
+        /// </summary>
+        /// This implements the IGadgeteerUartClient interface.
+        /// <param name="type"></param>
+        /// <param name="connection"></param>
+        /// <param name="bitrate"></param>
+        /// <param name="resetCount"></param>
+        /// <returns></returns>
+        public int GetGadgeteerStatus(out GadgeteerProxyType type, out GadgeteerConnection connection, out int bitrate, out int resetCount)
+        {
+            return m_impl.GetGadgeteerStatus(out type, out connection, out bitrate, out resetCount);
+        }
     }
 }

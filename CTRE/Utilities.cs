@@ -3,9 +3,9 @@ using Microsoft.SPOT;
 
 namespace CTRE
 {
-    class Util
+    public class Util
     {
-        float Deadband(float value, float range)
+        public static float Deadband(float value, float range)
         {
             if ( (value < -range) || (value > +range) )
             {
@@ -17,6 +17,19 @@ namespace CTRE
                 /* within range% so zero it */
                 return 0;
             }
+        }
+
+        public static bool Contains(char[] array, char item)
+        {
+            bool found = false;
+
+            foreach (char element in array)
+            {
+                if (element == item)
+                    found = true;
+            }
+
+            return found;
         }
     }
 }
